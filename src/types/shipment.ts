@@ -160,11 +160,13 @@ export interface SheetTotalRow {
   BL?: string;
   CO?: string;
   HC?: string;
+  TRA_CONG?: string;
   requist_docs?: number;
   total_docs?: number;
   mis_docs?: string;
   status?: number;
   time_update?: string;
+  [key: string]: string | number | undefined;
 }
 
 export interface SheetSummaryRow {
