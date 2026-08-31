@@ -2,6 +2,26 @@ import type { AuthUser, LoginResponse } from "@/types/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 const AUTH_STORAGE_KEY = "dashboard_auth_user";
+const FALLBACK_ADMIN_USERNAME = "admin";
+const FALLBACK_ADMIN_PASSWORD = "123456789";
+
+const fallbackAdmin: AuthUser = {
+  username: FALLBACK_ADMIN_USERNAME,
+  name: "Administrator",
+  role: "Admin",
+};
+
+function isFallbackAdminLogin(username: string, password: string): boolean {
+  return username.trim().toLowerCase() === FALLBACK_ADMIN_USERNAME
+    && password === FALLBACK_ADMIN_PASSWORD;
+}
+
+function storeUser(user: AuthUser): AuthUser {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+  }
+  return user;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -39,25 +59,37 @@ function extractUser(json: LoginResponse, fallbackUsername: string): AuthUser {
 }
 
 export async function login(username: string, password: string): Promise<AuthUser> {
-  const res = await fetch(`${API_BASE}/api/auth/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ username, password }),
-  });
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username, password }),
+    });
 
-  const json = (await res.json()) as LoginResponse;
+    const json = (await res.json().catch(() => ({}))) as LoginResponse;
 
-  if (!res.ok) {
-    throw new Error(json.message || "Login failed");
+    // Chỉ fallback khi backend/database gặp lỗi server, không fallback khi sai mật khẩu.
+    if (res.status >= 500 && isFallbackAdminLogin(username, password)) {
+      return storeUser(fallbackAdmin);
+    }
+
+    if (!res.ok) {
+      throw new Error(json.message || "Login failed");
+    }
+
+    return storeUser(extractUser(json, username));
+  } catch (error) {
+    // Khi backend/PostgreSQL không kết nối được, cho phép tài khoản dự phòng đăng nhập.
+    if (error instanceof TypeError && isFallbackAdminLogin(username, password)) {
+      return storeUser(fallbackAdmin);
+    }
+    if (error instanceof TypeError) {
+      throw new Error("Không thể kết nối đến máy chủ");
+    }
+    throw error;
   }
-
-  const user = extractUser(json, username);
-  if (typeof window !== "undefined") {
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
-  }
-  return user;
 }
 
 export function getStoredUser(): AuthUser | null {
