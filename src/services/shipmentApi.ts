@@ -3,6 +3,7 @@ import type {
   DriveDataResponse,
   SheetSummaryRow,
   SheetTotalRow,
+  ReturnItem,
   Shipment,
   ShipmentDocument,
   ShipmentMetricsSummary,
@@ -12,6 +13,12 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000
 const DOCUMENT_CODES = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
   "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONG",
+] as const;
+
+export const SUMMARY_FIELDS = [
+  "Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng",
+  "INV", "Ngày INV", "Số hộp", "Trọng lượng", "Trọng lượng cả bì", "BL NO.",
+  "Số Container", "Hãng tàu", "Cảng đến", "ETD", "ETA",
 ] as const;
 
 function endpoint(path: string): string {
@@ -83,9 +90,20 @@ function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, ind
   const documents = buildDocuments(total);
   const receivedDocs = documents.filter((document) => document.status === "ok").length;
   const totalDocs = documents.length;
-  const docStatus = Number(total?.status ?? (receivedDocs === totalDocs ? 1 : 0));
-  const completed = docStatus === 1;
+  // Ưu tiên số lượng URL thực tế: có trường hợp sheet Total chưa kịp cập nhật
+  // cột status nhưng toàn bộ 15 chứng từ đã tồn tại.
+  const completeByDocuments = receivedDocs === totalDocs && totalDocs > 0;
+  const docStatus = completeByDocuments ? 1 : Number(total?.status ?? 0);
+  const completed = completeByDocuments;
   const eta = parseDate(getSheetValue(row, "ETA"));
+  // Giữ toàn bộ các cột thực tế mà backend trả về, không giới hạn ở danh sách
+  // cố định để các cột mới trong sheet cũng xuất hiện trong tab Chi tiết.
+  const summaryFields = Object.fromEntries(
+    Object.entries(row).map(([field, value]) => [
+      repairMojibake(field).trim(),
+      value == null ? "" : String(value).trim(),
+    ]),
+  );
 
   return {
     id: `SH-${orderCode}-${index}`,
@@ -113,6 +131,7 @@ function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, ind
     flowStageKey: completed ? "delivered" : "shipping",
     flowStageLabel: completed ? "Hoàn thành" : "Đang xử lý",
     updatedAt: total?.time_update || new Date().toISOString(),
+    summaryFields,
     createdAt: parseDate(getSheetValue(row, "Ngày HĐ PI")) || new Date().toISOString(),
   };
 }
@@ -154,6 +173,28 @@ export async function fetchShipments(): Promise<{ shipments: Shipment[]; lastUpd
   const [{ rows, updatedAt }, totalMap] = await Promise.all([fetchSheetSummaryRows(), fetchSheetTotalMap()]);
   const shipments = rows.map((row, index) => mapShipment(row, totalMap.get(getSheetValue(row, "Số HĐ")), index)).filter((shipment) => shipment.orderCode);
   return { shipments, lastUpdated: updatedAt, updatedBy: "" };
+}
+
+function mapReturnItem(row: Record<string, unknown>): ReturnItem {
+  return {
+    ngay: getSheetValue(row, "NGÀY"),
+    soCont: getSheetValue(row, "SỐ CONT"),
+    soHd: getSheetValue(row, "SỐ HĐ"),
+    nhaXe: getSheetValue(row, "NHÀ XE"),
+    xeTai: getSheetValue(row, "XE_TÀI"),
+    noiLayHang: getSheetValue(row, "NƠI LẤY HÀNG"),
+    noiTraHang: getSheetValue(row, "NƠI TRẢ HÀNG"),
+    noiHaRong: getSheetValue(row, "NƠI HẠ RỖNG"),
+    nhapXuat: getSheetValue(row, "NHẬP/XUẤT"),
+  };
+}
+
+export async function fetchReturnItem(orderCode: string): Promise<ReturnItem | null> {
+  const result = await requestJson<{ data?: Record<string, unknown>[] } | Record<string, unknown>[]>("getSheetReturnItem");
+  const rows = Array.isArray(result) ? result : result.data || [];
+  const wanted = orderCode.trim().toUpperCase();
+  const row = rows.find((item) => mapReturnItem(item).soHd.trim().toUpperCase() === wanted);
+  return row ? mapReturnItem(row) : null;
 }
 
 export interface SheetNotification {

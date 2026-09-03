@@ -4,8 +4,8 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentsAndSaveStatus, editSummary, getArchivedDocuments, moveCompletedOrder, uploadDocument } from "@/services/shipmentApi";
-import type { ArchivedDocumentsResponse } from "@/types/shipment";
+import { analyzeDocument, checkDocumentsAndSaveStatus, editSummary, fetchReturnItem, getArchivedDocuments, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
+import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 
@@ -16,7 +16,7 @@ interface ShipmentDetailModalProps {
   onRefresh?: () => Promise<void>;
 }
 
-type ModalTab = "overview" | "journey" | "documents" | "history" | "folder";
+type ModalTab = "overview" | "journey" | "documents" | "return" | "details" | "folder";
 
 const TAB_LIST: { key: ModalTab; label: string; icon: React.ReactNode }[] = [
   {
@@ -64,14 +64,35 @@ const TAB_LIST: { key: ModalTab; label: string; icon: React.ReactNode }[] = [
   //   ),
   // },
   {
-    key: "folder",
-    label: "Lưu trữ",
+    key: "return",
+    label: "Hạ rỗng",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        <path d="M3 17h18"/><path d="M5 17V8h14v9"/><path d="M8 8V5h8v3"/><circle cx="7" cy="19" r="2"/><circle cx="17" cy="19" r="2"/>
       </svg>
     ),
   },
+  {
+    key: "details",
+    label: "Chi tiết",
+    icon: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>
+      </svg>
+    ),
+  },
+];
+
+const RETURN_FIELDS: { key: keyof ReturnItem; label: string }[] = [
+  { key: "ngay", label: "Ngày" },
+  { key: "soCont", label: "Số cont" },
+  { key: "soHd", label: "Số HĐ" },
+  { key: "nhaXe", label: "Nhà xe" },
+  { key: "xeTai", label: "Xe / tài xế" },
+  { key: "noiLayHang", label: "Nơi lấy hàng" },
+  { key: "noiTraHang", label: "Nơi trả hàng" },
+  { key: "noiHaRong", label: "Nơi hạ rỗng" },
+  { key: "nhapXuat", label: "Nhập / Xuất" },
 ];
 
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string; dot: string }> = {
@@ -106,6 +127,11 @@ const STAGE_DOC_GROUPS: Record<Exclude<ShipmentFlowStage["key"], "delivered">, s
   fifteenb: ["15B"],
   customs: ["QDTQ", "MV"],
 };
+
+const DOCUMENT_DISPLAY_ORDER = [
+  "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
+  "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONG",
+];
 
 type CarrierTrackingLink = {
   name: string;
@@ -403,6 +429,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [activeTab, setActiveTab] = useState<ModalTab>("overview");
   const [archived, setArchived] = useState<ArchivedDocumentsResponse | null>(null);
   const [isArchiveLoading, setIsArchiveLoading] = useState(false);
+  const [returnItem, setReturnItem] = useState<ReturnItem | null>(null);
+  const [isReturnLoading, setIsReturnLoading] = useState(false);
+  const [isReturnEditing, setIsReturnEditing] = useState(false);
+  const [returnForm, setReturnForm] = useState<ReturnItem | null>(null);
+  const [isDetailsEditing, setIsDetailsEditing] = useState(false);
+  const [detailForm, setDetailForm] = useState<Record<string, string>>({});
+  const [isSavingDetails, setIsSavingDetails] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
   const [localUploads, setLocalUploads] = useState<Record<string, string>>({});
@@ -414,8 +447,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isOcrSaving, setIsOcrSaving] = useState(false);
   const [ocrUploadError, setOcrUploadError] = useState("");
   const [selectedMissingDocIds, setSelectedMissingDocIds] = useState<string[]>([]);
-  const [isSendingEmail, setIsSendingEmail] = useState(false);
-  const [emailSent, setEmailSent] = useState(false);
+  const [isSendingEmail] = useState(false);
+  const [emailSent] = useState(false);
   const [isOpeningTracking, setIsOpeningTracking] = useState(false);
   const [trackingFeedback, setTrackingFeedback] = useState<{
     type: "success" | "error";
@@ -434,6 +467,22 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   useEffect(() => {
     if (!isOpen || !shipment) return;
     setArchived(null);
+    setReturnItem(null);
+    setReturnForm(null);
+    setIsReturnEditing(false);
+    setDetailForm(shipment.summaryFields || {});
+    setIsDetailsEditing(false);
+    setIsReturnLoading(true);
+    void fetchReturnItem(shipment.orderCode)
+      .then((result) => {
+        setReturnItem(result);
+        setReturnForm(result);
+      })
+      .catch(() => {
+        setReturnItem(null);
+        setReturnForm(null);
+      })
+      .finally(() => setIsReturnLoading(false));
     void getArchivedDocuments(shipment.orderCode)
       .then((result) => setArchived(result.archived ? result : { success: true, archived: false }))
       .catch(() => setArchived({ success: true, archived: false }));
@@ -465,13 +514,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   : hasStageWarning || shipment.flowStageLate
   ? "text-blue-light-600 bg-blue-light-50 dark:bg-blue-light-500/10"
   : "text-blue-light-600 bg-blue-light-50 dark:bg-blue-light-500/10";
-  const missingDocsCount = shipment.totalDocs - shipment.receivedDocs;
   const documentsSorted = [...(shipment.documents || [])].sort((a, b) => {
-    if (a.status !== b.status) return a.status === "ok" ? -1 : 1;
-    return a.name.localeCompare(b.name, "vi");
+    const orderA = DOCUMENT_DISPLAY_ORDER.indexOf(a.id.toUpperCase());
+    const orderB = DOCUMENT_DISPLAY_ORDER.indexOf(b.id.toUpperCase());
+    return (orderA < 0 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB < 0 ? Number.MAX_SAFE_INTEGER : orderB);
   });
   const missingDocs = documentsSorted.filter(d => d.status === "missing" || d.status === "pending");
   const selectedMissingDocs = missingDocs.filter((doc) => selectedMissingDocIds.includes(doc.id));
+  const isDocumentsComplete = shipment.docStatus === 1 || (
+    shipment.totalDocs > 0 && shipment.receivedDocs >= shipment.totalDocs && missingDocs.length === 0
+  );
   const selectedMissingIds = selectedMissingDocIds;
   const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
   // Tất cả hãng dùng chuỗi trước dấu phẩy trong cột BL NO.
@@ -614,17 +666,45 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleArchive = async () => {
-    if (!isAdmin || shipment.docStatus !== 1 || archived?.archived || isArchiveLoading) return;
+    if (!isAdmin || !isDocumentsComplete || archived?.archived || isArchiveLoading) return;
     setIsArchiveLoading(true);
     try {
+      // Đồng bộ lại status trong backend trước khi yêu cầu chuyển hồ sơ.
+      // UI có thể đã đủ 15/15 nhưng cột status trong Sheet Total chưa kịp cập nhật.
+      await checkDocumentsAndSaveStatus();
       await moveCompletedOrder(shipment.orderCode);
       const result = await getArchivedDocuments(shipment.orderCode);
       setArchived(result);
-      setActiveTab("folder");
+      setActiveTab("documents");
     } catch (error) {
       alert(error instanceof Error ? error.message : "Không thể lưu trữ hồ sơ");
     } finally {
       setIsArchiveLoading(false);
+    }
+  };
+
+  const handleSaveDetails = async () => {
+    if (!isAdmin || isSavingDetails) return;
+    const data: Record<string, string> = {};
+    Object.entries(detailForm).forEach(([field, nextValue]) => {
+      const normalizedField = field.trim().toLowerCase();
+      if (normalizedField === "số hđ" || normalizedField === "stt" || normalizedField === "order_code" || normalizedField === "order code") return;
+      if (nextValue !== (shipment.summaryFields?.[field] || "")) data[field] = nextValue;
+    });
+    if (Object.keys(data).length === 0) {
+      setIsDetailsEditing(false);
+      return;
+    }
+    setIsSavingDetails(true);
+    try {
+      await editSummary({ action: "editSummary", orderCode: shipment.orderCode, data });
+      await onRefresh?.();
+      setIsDetailsEditing(false);
+      alert("Đã cập nhật chi tiết đơn hàng");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Không thể cập nhật chi tiết đơn hàng");
+    } finally {
+      setIsSavingDetails(false);
     }
   };
 
@@ -670,16 +750,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             {tab.label}
           </button>
         ))}
-        {isAdmin && shipment.docStatus === 1 && !archived?.archived && (
-          <button
-            type="button"
-            onClick={handleArchive}
-            disabled={isArchiveLoading}
-            className="inline-flex min-w-0 basis-[calc(50%-0.25rem)] flex-1 items-center justify-center gap-1.5 rounded-lg bg-success-500 px-2 py-2 text-xs font-semibold text-white hover:bg-success-600 disabled:cursor-not-allowed disabled:opacity-60 sm:basis-auto sm:flex-none sm:px-3 sm:py-1.5"
-          >
-            {isArchiveLoading ? "Đang lưu..." : "Lưu trữ"}
-          </button>
-        )}
       </div>
 
       <input id="shipment-document-upload" type="file" className="hidden" accept=".pdf,application/pdf" onChange={handleUploadSelected} />
@@ -932,6 +1002,19 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         {/* ── DOCUMENTS ── */}
         {activeTab === "documents" && (
           <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
+            {isAdmin && isDocumentsComplete && !archived?.archived && (
+              <button type="button" onClick={handleArchive} disabled={isArchiveLoading} className="flex w-full items-center justify-center rounded-xl bg-success-500 px-4 py-3 text-sm font-semibold text-white hover:bg-success-600 disabled:cursor-not-allowed disabled:opacity-60">
+                {isArchiveLoading ? "Đang lưu trữ..." : "Lưu trữ hồ sơ"}
+              </button>
+            )}
+            {archived?.archived && archived.folderUrl && (
+              <a href={archived.folderUrl} target="_blank" rel="noopener noreferrer" className="flex w-full items-center justify-center gap-2 rounded-xl border border-brand-200 bg-brand-500 px-4 py-3 text-sm font-semibold text-white hover:bg-brand-600 dark:border-brand-500/30">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                </svg>
+                Mở thư mục chứng từ
+              </a>
+            )}
             {/* Missing docs alert removed: upload is available on each document row. */}
             {false && missingDocs.length > 0 && (
               <div className="rounded-xl border border-error-200 bg-error-50 p-3 dark:border-error-500/20 dark:bg-error-500/10 sm:p-4">
@@ -1079,35 +1162,81 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           </div>
         )}
 
-        {/* ── HISTORY ── */}
-        {activeTab === "history" && (
-          <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-1 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
-            {(shipment.statusHistory || []).length === 0 ? (
-              <p className="py-8 text-center text-sm text-gray-400">Chưa có lịch sử cập nhật</p>
+        {/* ── RETURN ITEM ── */}
+        {activeTab === "return" && (
+          <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-800 dark:text-white">Thông tin hạ rỗng</p>
+                <p className="mt-1 text-xs text-gray-400">Dữ liệu từ bảng hạ rỗng của hệ thống</p>
+              </div>
+              {isAdmin && (
+                <button type="button" onClick={() => setIsReturnEditing((current) => !current)} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                  {isReturnEditing ? "Đóng sửa" : "Sửa"}
+                </button>
+              )}
+            </div>
+            {isReturnLoading ? (
+              <p className="py-8 text-center text-sm text-gray-400">Đang tải dữ liệu hạ rỗng...</p>
             ) : (
-              <div className="relative">
-                {/* Vertical line */}
-                <div className="absolute left-4 top-0 bottom-0 w-px bg-gray-200 dark:bg-gray-700" />
-                <div className="flex flex-col gap-0">
-                  {[...(shipment.statusHistory || [])].reverse().map((h) => (
-                    <div key={h.id} className="relative flex gap-4 pb-5 pl-10">
-                      {/* Dot */}
-                      <div className="absolute left-2.5 top-1 flex h-3 w-3 items-center justify-center rounded-full border-2 border-white bg-brand-500 dark:border-gray-900 shadow-sm" />
-                      <div className="flex-1 rounded-xl border border-gray-100 bg-gray-50 p-3 dark:border-gray-800 dark:bg-white/[0.02]">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="text-sm font-semibold text-gray-800 dark:text-white/90">{h.action}</p>
-                          <span className="text-xs text-gray-400 whitespace-nowrap">{formatDateTime(h.timestamp)}</span>
-                        </div>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{h.description}</p>
-                        {h.user && (
-                          <p className="mt-1 text-xs text-gray-400">
-                            👤 {h.user}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {RETURN_FIELDS.map(({ key, label }) => (
+                  <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                    {label}
+                    <input
+                      type="text"
+                      value={returnForm?.[key] || ""}
+                      disabled={!isReturnEditing}
+                      onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)}
+                      className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
+            {isReturnEditing && (
+              <p className="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
+                Backend hiện chưa cung cấp router lưu bảng hạ rỗng, nên phần chỉnh sửa đang ở chế độ xem trước và chưa ghi dữ liệu.
+              </p>
+            )}
+            {!isReturnLoading && !returnItem && !isReturnEditing && (
+              <p className="py-4 text-center text-sm text-gray-400">Chưa có dữ liệu hạ rỗng cho đơn này</p>
+            )}
+          </div>
+        )}
+
+        {/* ── DETAILS ── */}
+        {activeTab === "details" && (
+          <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-gray-800 dark:text-white">Chi tiết đơn hàng</p>
+                <p className="mt-1 text-xs text-gray-400">Toàn bộ trường dữ liệu từ sheet Summary</p>
+              </div>
+              {isAdmin && (
+                <button type="button" onClick={() => setIsDetailsEditing((current) => !current)} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                  {isDetailsEditing ? "Đóng sửa" : "Sửa"}
+                </button>
+              )}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {(Object.keys(detailForm).length > 0 ? Object.keys(detailForm) : [...SUMMARY_FIELDS]).map((field) => (
+                <label key={field} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                  {field}
+                  <input
+                    type="text"
+                    value={detailForm[field] || ""}
+                    disabled={!isDetailsEditing || field.trim().toLowerCase() === "stt" || field.trim().toLowerCase() === "số hđ" || field.trim().toLowerCase() === "order_code" || field.trim().toLowerCase() === "order code"}
+                    onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))}
+                    className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                  />
+                </label>
+              ))}
+            </div>
+            {isDetailsEditing && (
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => { setDetailForm(shipment.summaryFields || {}); setIsDetailsEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">Hủy</button>
+                <button type="button" onClick={handleSaveDetails} disabled={isSavingDetails} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingDetails ? "Đang lưu..." : "Lưu thay đổi"}</button>
               </div>
             )}
           </div>

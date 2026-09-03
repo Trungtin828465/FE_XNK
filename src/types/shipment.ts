@@ -106,6 +106,8 @@ export interface Shipment {
   documents?: ShipmentDocument[];
   timeline?: ShipmentTimeline[];
   statusHistory?: ShipmentStatusHistory[];
+  /** Các cột nguyên bản của tab Summary, dùng cho tab Chi tiết và chỉnh sửa. */
+  summaryFields?: Record<string, string>;
   updatedAt: string;
   createdAt: string;
 }
@@ -195,4 +197,16 @@ export interface SheetSummaryRow {
   "Giá bán($)": number;
   "Thành tiền ($)": number;
   [key: string]: unknown;
+}
+
+export interface ReturnItem {
+  ngay: string;
+  soCont: string;
+  soHd: string;
+  nhaXe: string;
+  xeTai: string;
+  noiLayHang: string;
+  noiTraHang: string;
+  noiHaRong: string;
+  nhapXuat: string;
 }
