@@ -7,8 +7,12 @@ import DashboardInfoBar from "./DashboardInfoBar";
 import ShipmentFilters from "./ShipmentFilters";
 import ShipmentTable from "./ShipmentTable";
 import ShipmentDetailModal from "./ShipmentDetailModal";
+import CreateShipmentModal from "./CreateShipmentModal";
+import { useAuth } from "@/context/AuthContext";
 
 export default function ShipmentDashboard() {
+  const { user } = useAuth();
+  const isAdmin = user?.role?.trim().toLowerCase() === "admin";
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
   const [updatedBy, setUpdatedBy] = useState<string>("");
@@ -29,6 +33,7 @@ export default function ShipmentDashboard() {
 
   const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -153,6 +158,12 @@ export default function ShipmentDashboard() {
             Theo dõi và quản lý toàn bộ lô hàng • Hải quan & Vận chuyển
           </p>
         </div>
+        <div className="flex items-center gap-3">
+        {isAdmin && (
+          <button type="button" onClick={() => setIsCreateModalOpen(true)} className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600">
+            + Tạo đơn hàng mới
+          </button>
+        )}
         {isLoading && (
           <div className="flex items-center gap-2 text-xs text-gray-400">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-spin text-brand-500">
@@ -163,6 +174,7 @@ export default function ShipmentDashboard() {
             Đang tải từ Google Sheet...
           </div>
         )}
+        </div>
       </div>
 
       {/* API Error Banner */}
@@ -230,6 +242,12 @@ export default function ShipmentDashboard() {
         isOpen={isModalOpen}
         onRefresh={loadData}
         onClose={() => { setIsModalOpen(false); setSelectedShipment(null); }}
+      />
+      <CreateShipmentModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        onCreated={loadData}
+        existingOrderCodes={shipments.map((shipment) => shipment.orderCode)}
       />
     </div>
   );

@@ -392,7 +392,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
-  const [editForm, setEditForm] = useState({ Ten_hang: "", ETA: "", Ma_tau: "" });
+  const [editForm, setEditForm] = useState({ product: "", carrier: "" });
   const [selectedMissingDocIds, setSelectedMissingDocIds] = useState<string[]>([]);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
@@ -405,9 +405,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   useEffect(() => {
     if (shipment) {
       setEditForm({
-        Ten_hang: shipment.shipName || "",
-        ETA: shipment.eta || "",
-        Ma_tau: shipment.vessel || "",
+        product: shipment.shipName || "",
+        carrier: shipment.vessel || "",
       });
       setIsEditing(false);
     }
@@ -576,9 +575,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const handleSaveEdit = async () => {
     if (!isAdmin || isSavingEdit) return;
     const data: Record<string, string | number> = {};
-    if (editForm.Ten_hang !== (shipment.shipName || "")) data.Ten_hang = editForm.Ten_hang;
-    if (editForm.ETA !== (shipment.eta || "")) data.ETA = editForm.ETA;
-    if (editForm.Ma_tau !== (shipment.vessel || "")) data.Ma_tau = editForm.Ma_tau;
+    if (editForm.product !== (shipment.shipName || "")) data["Tên hàng"] = editForm.product;
+    if (editForm.carrier !== (shipment.vessel || "")) data["Hãng tàu"] = editForm.carrier;
     if (Object.keys(data).length === 0) {
       setIsEditing(false);
       return;
@@ -685,9 +683,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
               {([
-                ["Ten_hang", "Tên sản phẩm", "text"],
-                ["ETA", "ETA", "date"],
-                ["Ma_tau", "Hãng tàu", "text"],
+                ["product", "Tên sản phẩm", "text"],
+                ["carrier", "Hãng tàu", "text"],
               ] as const).map(([key, label, type]) => (
                 <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
                   {label}
@@ -697,26 +694,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       type={type}
                       value={editForm[key]}
                       onChange={(event) => setEditForm((current) => ({ ...current, [key]: event.target.value }))}
-                      className={`w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white ${key === "ETA" ? "input-date-icon pr-10" : ""}`}
+                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                     />
-                    {key === "ETA" && (
-                      <button
-                        type="button"
-                        aria-label="Mở lịch chọn ETA"
-                        onClick={() => {
-                          const input = document.getElementById("shipment-edit-ETA") as HTMLInputElement | null;
-                          input?.showPicker?.();
-                        }}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-gray-700"
-                      >
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                          <rect x="3" y="4" width="18" height="17" rx="2" />
-                          <line x1="16" y1="2" x2="16" y2="6" />
-                          <line x1="8" y1="2" x2="8" y2="6" />
-                          <line x1="3" y1="10" x2="21" y2="10" />
-                        </svg>
-                      </button>
-                    )}
                   </span>
                 </label>
               ))}

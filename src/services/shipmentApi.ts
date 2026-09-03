@@ -4,7 +4,11 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000"
 
 function parseDate(val: unknown): string | undefined {
   if (!val || val === "") return undefined;
-  const d = new Date(String(val));
+  const raw = String(val).trim().split(",")[0].trim();
+  const usDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const d = usDate
+    ? new Date(Number(usDate[3]), Number(usDate[1]) - 1, Number(usDate[2]))
+    : new Date(raw);
   return isNaN(d.getTime()) ? undefined : d.toISOString().split("T")[0];
 }
 
@@ -50,6 +54,35 @@ function getSellOrderCode(row: unknown): string {
 function pickRowString(row: SheetSummaryRow, keys: string[]): string {
   for (const key of keys) {
     const value = row[key];
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text !== "") return text;
+  }
+  const normalizeHeader = (value: string) => {
+    const normalize = (text: string) => text
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+    const variants = [normalize(value)];
+    // Hỗ trợ dữ liệu cũ bị giải mã UTF-8 sai thành chuỗi dạng "TÃªn hÃ ng".
+    if (/[ÃÂ]/.test(value)) {
+      try {
+        const repaired = new TextDecoder("utf-8").decode(
+          Uint8Array.from(value, (character) => character.charCodeAt(0)),
+        );
+        variants.push(normalize(repaired));
+      } catch {
+        // Dùng giá trị gốc nếu môi trường không có TextDecoder.
+      }
+    }
+    return variants.join("|");
+  };
+  const normalizedRow = new Map(
+    Object.entries(row as Record<string, unknown>).map(([key, value]) => [normalizeHeader(key), value]),
+  );
+  for (const key of keys) {
+    const value = normalizedRow.get(normalizeHeader(key));
     if (value == null) continue;
     const text = String(value).trim();
     if (text !== "") return text;
@@ -348,7 +381,7 @@ function deriveFlowStage(
 //   return { key: "buying", label: "Lên đơn hàng", isLate: etaLate };
 // }
 
-function mapToShipment(row: SheetSummaryRow, totalMap: Map<string, SheetTotalRow>, index: number): Shipment {
+function mapToShipmentLegacy(row: SheetSummaryRow, totalMap: Map<string, SheetTotalRow>, index: number): Shipment {
   const orderCode = String(row["Số HĐ"] ?? "").trim();
   const docInfo = totalMap.get(orderCode);
   const totalDocs = docInfo ? (docInfo.requist_docs ?? DOCS.length) : 0;
@@ -379,7 +412,7 @@ function mapToShipment(row: SheetSummaryRow, totalMap: Map<string, SheetTotalRow
     orderCode,
     shipName: String(row["Tên hàng"] ?? "").trim(),
     supplier: String(row["KHÁCH HÀNG"] ?? "").trim(),
-    factory: String(row["NHÀ MÁY"] ?? "").trim() || undefined,
+    factory: String(row["Nhà cung cấp"] ?? "").trim() || undefined,
     factoryCode: String(row["MÃ NHÀ MÁY"] ?? "").trim() || undefined,
     origin: String(row["XUẤT XỨ"] ?? "").trim() || undefined,
     vessel: String(row["Hãng tàu"] ?? "").trim() || undefined,
@@ -408,6 +441,50 @@ function mapToShipment(row: SheetSummaryRow, totalMap: Map<string, SheetTotalRow
     thanhTien: typeof row["Thành tiền ($)"] === "number" ? row["Thành tiền ($)"] : undefined,
     updatedAt: docInfo?.time_update ?? new Date().toISOString(),
     createdAt: parseDate(pickRowString(row, ["Ngày HĐ", "NGÀY HĐ", "Ngay HD"])) ?? new Date().toISOString(),
+  };
+}
+
+function mapToShipment(row: SheetSummaryRow, totalMap: Map<string, SheetTotalRow>, index: number): Shipment {
+  const orderCode = pickRowString(row, ["Số HĐ", "Order_code", "Order code"]);
+  const docInfo = totalMap.get(orderCode);
+  const totalDocs = docInfo ? (docInfo.requist_docs ?? DOCS.length) : 0;
+  const receivedDocs = docInfo?.total_docs ?? (docInfo ? DOCS.filter((key) => Boolean(String(docInfo[key] ?? "").trim())).length : 0);
+  const documents = docInfo ? buildDocuments(totalDocs, receivedDocs, docInfo.mis_docs ?? "", row, docInfo) : [];
+  const eta = parseDate(pickRowString(row, ["ETA"]));
+  const ata = parseDate(pickRowString(row, ["ATA"]));
+  const flowStage = deriveFlowStage(documents, eta);
+  const isCompleted = totalDocs > 0 && receivedDocs >= totalDocs;
+  const isDelivered = flowStage.key === "delivered";
+
+  return {
+    id: `SH-${orderCode}-${index}`,
+    orderCode,
+    shipName: pickRowString(row, ["Tên hàng"]),
+    supplier: pickRowString(row, ["Nhà cung cấp"]),
+    origin: pickRowString(row, ["XUẤT XỨ"]) || undefined,
+    vessel: pickRowString(row, ["Hãng tàu"]) || undefined,
+    bill: pickRowString(row, ["BL NO."]) || undefined,
+    etd: parseDate(pickRowString(row, ["ETD"])),
+    eta,
+    ata,
+    port: pickRowString(row, ["Cảng đến"]) || undefined,
+    contCount: undefined,
+    status: isDelivered || isCompleted ? "completed" : flowStage.key === "buying" ? "missing_docs" : "shipping",
+    docStatus: docInfo?.status ?? 0,
+    flowStageKey: isDelivered ? "delivered" : flowStage.key,
+    flowStageLabel: isDelivered ? "Giao hàng thành công" : flowStage.label,
+    flowStageLate: !isCompleted && !isDelivered && flowStage.isLate || undefined,
+    totalDocs,
+    receivedDocs,
+    missingDocs: docInfo?.mis_docs ?? "",
+    driveUrl: docInfo?.["folder url"] as string | undefined,
+    timeUpdate: docInfo?.time_update,
+    documents,
+    thuong: Number(pickRowString(row, ["Số hộp"])) || undefined,
+    trlg: Number(pickRowString(row, ["Trọng lượng"])) || undefined,
+    giaB: Number(pickRowString(row, ["Giá tổng"]).replace(/[^\d.,-]/g, "").replace(/\./g, "").replace(",", ".")) || undefined,
+    updatedAt: docInfo?.time_update ?? new Date().toISOString(),
+    createdAt: parseDate(pickRowString(row, ["Ngày HĐ PI"])) ?? new Date().toISOString(),
   };
 }
 
@@ -442,9 +519,9 @@ export async function fetchSheetSummaryRows(): Promise<{ rows: SheetSummaryRow[]
     throw new Error(`getSheetSummary lỗi: ${res.status}${reason ? ` - ${reason}` : ""}`);
   }
 
-  const rows: SheetSummaryRow[] = (json?.data ?? []).filter(
+  const rows: SheetSummaryRow[] = json?.data ?? []; /*
     (r: SheetSummaryRow) => r["Số HĐ"] != null && r["Số HĐ"] !== "" && r["Tên hàng"] != null && r["Tên hàng"] !== ""
-  );
+  ); */
   return { rows, updatedAt: json?.updatedAt ?? new Date().toISOString() };
 }
 
@@ -573,6 +650,41 @@ export function editSummary(payload: EditSummaryPayload): Promise<DriveDataRespo
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+export interface AnalyzeDocumentResponse {
+  success: boolean;
+  documentType: "PI" | "INV" | "PKL" | "BL";
+  fileName: string;
+  data: Record<string, string>;
+  _confidence: number;
+  _reason?: string;
+  model?: string;
+}
+
+export async function analyzeDocument(payload: {
+  documentType: "PI";
+  file: File;
+}): Promise<AnalyzeDocumentResponse> {
+  try {
+    const formData = new FormData();
+    formData.append("documentType", payload.documentType);
+    formData.append("file", payload.file, payload.file.name);
+
+    const response = await fetch(backendUrl("ocr/analyze"), {
+      method: "POST",
+      body: formData,
+      cache: "no-store",
+    });
+    const json = await response.json().catch(() => ({})) as AnalyzeDocumentResponse & { message?: string; error?: string };
+    if (!response.ok || json.success === false) {
+      throw new Error(json.message || json.error || "Không thể phân tích file OCR");
+    }
+    return json;
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error("Không thể kết nối đến máy chủ OCR");
+    throw error;
+  }
 }
 
 export function computeMetrics(shipments: Shipment[]): ShipmentMetricsSummary {
