@@ -16,7 +16,6 @@ interface ReviewFields {
   orderDate: string;
   supplier: string;
   origin: string;
-  destination: string;
   product: string;
   totalPrice: string;
 }
@@ -26,7 +25,6 @@ const EMPTY_FIELDS: ReviewFields = {
   orderDate: "",
   supplier: "",
   origin: "",
-  destination: "",
   product: "",
   totalPrice: "",
 };
@@ -47,7 +45,6 @@ function mapOcrFields(data: Record<string, string>): ReviewFields {
     orderDate: readField(data, ["Ngày HĐ PI", "Ngày HĐ", "Order date"]),
     supplier: readField(data, ["Nhà cung cấp", "Nha_cung_cap"]),
     origin: readField(data, ["XUẤT XỨ", "Xuat_xu"]),
-    destination: readField(data, ["Cảng đến", "Cang_den"]),
     product: readField(data, ["Tên hàng", "Ten_hang"]),
     totalPrice: readField(data, ["Giá tổng", "Gia"]),
   };
@@ -69,6 +66,8 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
+  const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
+  const [isFilePanelMaximized, setIsFilePanelMaximized] = useState(false);
   const [fileData, setFileData] = useState("");
   const [fields, setFields] = useState<ReviewFields>(EMPTY_FIELDS);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -94,6 +93,8 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
 
   const reset = () => {
     setFile(null);
+    setIsFilePanelOpen(false);
+    setIsFilePanelMaximized(false);
     setFileData("");
     setFields(EMPTY_FIELDS);
     setError("");
@@ -167,7 +168,6 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         "Ngày HĐ PI": fields.orderDate.trim(),
         "Nhà cung cấp": fields.supplier.trim(),
         "XUẤT XỨ": fields.origin.trim(),
-        "Cảng đến": fields.destination.trim(),
         "Tên hàng": fields.product.trim(),
         "Giá tổng": fields.totalPrice.trim(),
       };
@@ -186,13 +186,13 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     ["orderDate", "Ngày PI"],
     ["supplier", "Nhà cung cấp"],
     ["origin", "Xuất xứ"],
-    ["destination", "Cảng đến"],
     ["product", "Tên sản phẩm"],
     ["totalPrice", "Giá tổng"],
   ];
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} className="mx-2 flex max-h-[96vh] max-w-5xl flex-col overflow-hidden sm:mx-4 sm:max-h-[94vh]">
+    <>
+      <Modal isOpen={isOpen} onClose={handleClose} className="mx-2 flex max-h-[96vh] max-w-5xl flex-col overflow-hidden sm:mx-4 sm:max-h-[94vh]">
       <div className="border-b border-gray-100 px-6 pb-4 pt-6 dark:border-gray-800">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Tạo đơn hàng mới</h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Chọn file PI để hệ thống OCR phân tích thông tin.</p>
@@ -212,12 +212,12 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
             <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">
               Vui lòng kiểm tra lại thông tin OCR trước khi xác nhận tạo đơn.
             </div>
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
-              <div className="flex min-h-[120px] flex-col justify-center rounded-xl border border-gray-200 bg-gray-100 p-4 dark:border-gray-700 dark:bg-gray-900">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="hidden">
                 <p className="text-xs font-semibold text-gray-600 dark:text-gray-300">File PI đã chọn</p>
-                {filePreviewUrl && <a href={filePreviewUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex w-fit items-center rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-600">Mở file để đối chiếu</a>}
+                {filePreviewUrl && <button type="button" onClick={() => setIsFilePanelOpen(true)} className="mt-3 inline-flex w-fit items-center rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-600">Xem file PI</button>}
               </div>
-              <div className="grid content-start gap-3 sm:grid-cols-2 lg:grid-cols-1">
+              <div className="col-span-full grid content-start gap-3 sm:grid-cols-2">
                 {reviewFields.map(([key, label]) => (
                   <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
                     {label}
@@ -229,10 +229,24 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
           </>
         )}
       </div>
-      <div className="flex justify-end gap-2 border-t border-gray-100 px-6 py-4 dark:border-gray-800">
+      <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 px-6 py-4 dark:border-gray-800">
+        {filePreviewUrl && <button type="button" onClick={() => setIsFilePanelOpen(true)} className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Xem file PI</button>}
         <button type="button" onClick={handleClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
         <button type="button" onClick={handleConfirm} disabled={!file || isAnalyzing || isSaving || duplicateOrderCode} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Đang lưu..." : "Xác nhận tạo đơn"}</button>
       </div>
     </Modal>
+      {isFilePanelOpen && filePreviewUrl && (
+        <aside className={`fixed right-0 top-0 z-[100000] flex h-screen flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isFilePanelMaximized ? "w-full" : "w-[min(92vw,620px)]"}`}>
+          <div className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">
+            <p className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-white">{file?.name || "File PI"}</p>
+            <button type="button" onClick={() => setIsFilePanelMaximized((current) => !current)} className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{isFilePanelMaximized ? "Thu nhỏ" : "Phóng to"}</button>
+            <button type="button" onClick={() => setIsFilePanelOpen(false)} className="rounded-lg px-2 text-xl leading-none text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Đẩy panel sang phải">→</button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
+            <iframe title={`Xem ${file?.name || "File PI"}`} src={filePreviewUrl} className="h-full min-h-[calc(100vh-5rem)] w-full rounded-lg bg-white" />
+          </div>
+        </aside>
+      )}
+    </>
   );
 }

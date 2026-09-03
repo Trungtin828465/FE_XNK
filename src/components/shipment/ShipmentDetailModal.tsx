@@ -449,6 +449,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
   const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
+  const [isPreviewCollapsed, setIsPreviewCollapsed] = useState(false);
   const [ocrFilePreviewUrl, setOcrFilePreviewUrl] = useState<string | null>(null);
   const [localUploads, setLocalUploads] = useState<Record<string, string>>({});
   const [ocrUploadDocId, setOcrUploadDocId] = useState<string | null>(null);
@@ -468,6 +469,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   } | null>(null);
 
   useEffect(() => {
+    if (previewUrl) setIsPreviewCollapsed(false);
+  }, [previewUrl]);
+
+  useEffect(() => {
     if (!ocrUploadFile) {
       setOcrFilePreviewUrl(null);
       return;
@@ -478,9 +483,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   }, [ocrUploadFile]);
 
   useEffect(() => {
-    if (activeTab === "documents") {
-      setPreviewUrl(null);
-    }
     if (activeTab === "journey") {
       setTrackingFeedback(null);
     }
@@ -846,7 +848,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
                 <div className="mt-4 flex flex-wrap justify-end gap-2">
                   <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadFields({}); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
-                  <button type="button" onClick={() => { if (ocrUploadDocId && ocrFilePreviewUrl) setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: ocrFilePreviewUrl })); setActiveTab("documents"); }} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Xem file chứng từ</button>
+                  <button type="button" onClick={() => { if (ocrUploadDocId && ocrFilePreviewUrl) { setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: ocrFilePreviewUrl })); setPreviewUrl(ocrFilePreviewUrl); setPreviewName(ocrUploadFile.name); } setActiveTab("documents"); }} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20">Xem file chứng từ</button>
                   <button type="button" onClick={handleConfirmOcrUpload} disabled={isOcrSaving || !Object.values(ocrUploadFields || {}).some(Boolean)} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? "Đang lưu..." : "Xác nhận và lưu"}</button>
                 </div>
               </>
@@ -1390,19 +1392,24 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
       </div>
     </Modal>
-      {previewUrl && (
+      {previewUrl && !isPreviewCollapsed && (
         <aside className={`fixed right-0 top-0 z-[100000] flex h-screen flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isPreviewMaximized ? "w-full" : "w-[min(92vw,620px)]"}`}>
           <div className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">
             <p className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-white">{previewName}</p>
             <button type="button" onClick={() => setIsPreviewMaximized((current) => !current)} className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={isPreviewMaximized ? "Thu nhỏ" : "Phóng to"}>
               {isPreviewMaximized ? "Thu nhỏ" : "Phóng to"}
             </button>
-            <button type="button" onClick={() => setPreviewUrl(null)} className="rounded-lg px-2 text-xl leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Đóng xem file">×</button>
+            <button type="button" onClick={() => setIsPreviewCollapsed(true)} className="rounded-lg px-2 text-xl leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Đẩy panel sang phải">→</button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
             <iframe title={previewName} src={previewUrl} className="h-full min-h-[calc(100vh-5rem)] w-full rounded-lg bg-white" />
           </div>
         </aside>
+      )}
+      {previewUrl && isPreviewCollapsed && (
+        <button type="button" onClick={() => setIsPreviewCollapsed(false)} className="fixed right-0 top-1/2 z-[100000] rounded-l-xl border border-r-0 border-brand-200 bg-brand-500 px-3 py-4 text-sm font-semibold text-white shadow-lg hover:bg-brand-600" aria-label="Mở panel xem file">
+          ← File
+        </button>
       )}
     </>
   );
