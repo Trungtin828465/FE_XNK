@@ -4,7 +4,7 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentsAndSaveStatus, editSummary, fetchReturnItem, getArchivedDocuments, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentsAndSaveStatus, editReturnItem, editSummary, fetchReturnItem, getArchivedDocuments, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
@@ -273,6 +273,15 @@ function formatDate(iso?: string): string {
   return new Date(iso).toLocaleDateString("vi-VN");
 }
 
+function toDateInputValue(value?: string): string {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const match = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (match) return `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+  return "";
+}
+
 function formatDateTime(iso?: string): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
@@ -432,6 +441,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [returnItem, setReturnItem] = useState<ReturnItem | null>(null);
   const [isReturnLoading, setIsReturnLoading] = useState(false);
   const [isReturnEditing, setIsReturnEditing] = useState(false);
+  const [isSavingReturn, setIsSavingReturn] = useState(false);
   const [returnForm, setReturnForm] = useState<ReturnItem | null>(null);
   const [isDetailsEditing, setIsDetailsEditing] = useState(false);
   const [detailForm, setDetailForm] = useState<Record<string, string>>({});
@@ -488,7 +498,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     void fetchReturnItem(shipment.orderCode)
       .then((result) => {
         setReturnItem(result);
-        setReturnForm(result);
+        setReturnForm(result || { ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", xeTai: "", noiLayHang: "", noiTraHang: "", noiHaRong: "", nhapXuat: "" });
       })
       .catch(() => {
         setReturnItem(null);
@@ -733,6 +743,37 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       alert(error instanceof Error ? error.message : "Không thể cập nhật chi tiết đơn hàng");
     } finally {
       setIsSavingDetails(false);
+    }
+  };
+
+  const handleSaveReturn = async () => {
+    if (!isAdmin || !returnForm || isSavingReturn) return;
+    setIsSavingReturn(true);
+    try {
+      await editReturnItem({
+        action: "editReturnItem",
+        orderCode: shipment.orderCode,
+        data: {
+          "NGÀY": returnForm.ngay,
+          "SỐ CONT": returnForm.soCont,
+          "SỐ HĐ": shipment.orderCode,
+          "NHÀ XE": returnForm.nhaXe,
+          "XE_TÀI": returnForm.xeTai,
+          "NƠI LẤY HÀNG": returnForm.noiLayHang,
+          "NƠI TRẢ HÀNG": returnForm.noiTraHang,
+          "NƠI HẠ RỖNG": returnForm.noiHaRong,
+          "NHẬP/XUẤT": returnForm.nhapXuat,
+        },
+      });
+      const refreshed = await fetchReturnItem(shipment.orderCode);
+      setReturnItem(refreshed);
+      setReturnForm(refreshed || returnForm);
+      setIsReturnEditing(false);
+      alert("Đã cập nhật thông tin hạ rỗng");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Không thể cập nhật thông tin hạ rỗng");
+    } finally {
+      setIsSavingReturn(false);
     }
   };
 
@@ -1215,9 +1256,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
                     {label}
                     <input
-                      type="text"
-                      value={returnForm?.[key] || ""}
-                      disabled={!isReturnEditing}
+                      type={key === "ngay" ? "date" : "text"}
+                      value={key === "ngay" ? toDateInputValue(returnForm?.[key]) : returnForm?.[key] || ""}
+                      disabled={!isReturnEditing || key === "soHd"}
                       onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)}
                       className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                     />
@@ -1226,9 +1267,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               </div>
             )}
             {isReturnEditing && (
-              <p className="rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
-                Backend hiện chưa cung cấp router lưu bảng hạ rỗng, nên phần chỉnh sửa đang ở chế độ xem trước và chưa ghi dữ liệu.
-              </p>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => { setReturnForm(returnItem || { ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", xeTai: "", noiLayHang: "", noiTraHang: "", noiHaRong: "", nhapXuat: "" }); setIsReturnEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">Hủy</button>
+                <button type="button" onClick={handleSaveReturn} disabled={isSavingReturn} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingReturn ? "Đang lưu..." : "Lưu thay đổi"}</button>
+              </div>
             )}
             {!isReturnLoading && !returnItem && !isReturnEditing && (
               <p className="py-4 text-center text-sm text-gray-400">Chưa có dữ liệu hạ rỗng cho đơn này</p>

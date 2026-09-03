@@ -209,6 +209,20 @@ export async function fetchReturnItem(orderCode: string): Promise<ReturnItem | n
   return row ? mapReturnItem(row) : null;
 }
 
+export interface EditReturnItemPayload {
+  action: "editReturnItem";
+  orderCode: string;
+  data: Record<string, string | number>;
+}
+
+export function editReturnItem(payload: EditReturnItemPayload): Promise<DriveDataResponse> {
+  return requestJson<DriveDataResponse>("editReturnItem", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export interface SheetNotification {
   name?: string; order_code?: string; type?: string; mss_docs?: string; status?: string | number; update_by?: string; date?: string;
 }
