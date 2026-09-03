@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import type { Shipment, ShipmentFilter, ShipmentStatus, ShipmentFilterStatus } from "@/types/shipment";
-import { fetchShipments, triggerUpdateAll, computeMetrics } from "@/services/shipmentApi";
+import { fetchShipments, computeMetrics } from "@/services/shipmentApi";
 import ShipmentMetrics from "./ShipmentMetrics";
 import DashboardInfoBar from "./DashboardInfoBar";
 import ShipmentFilters from "./ShipmentFilters";
@@ -65,7 +65,6 @@ export default function ShipmentDashboard() {
 
   // Refresh handler
   const handleRefresh = useCallback(async () => {
-    await triggerUpdateAll();
     await loadData();
   }, [loadData]);
 

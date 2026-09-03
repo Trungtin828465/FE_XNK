@@ -4,7 +4,7 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { checkDocumentsAndSaveStatus, editSummary, getArchivedDocuments, moveCompletedOrder, uploadDocument } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentsAndSaveStatus, editSummary, getArchivedDocuments, moveCompletedOrder, uploadDocument } from "@/services/shipmentApi";
 import type { ArchivedDocumentsResponse } from "@/types/shipment";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
@@ -262,6 +262,23 @@ function formatAtaDelta(eta?: string, ata?: string): string | null {
   return `Giao muộn ${diffDays} ngày`;
 }
 
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return reject(new Error("Không đọc được file"));
+      resolve(reader.result.includes(",") ? reader.result.split(",", 2)[1] : reader.result);
+    };
+    reader.onerror = () => reject(new Error("Không đọc được file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function getOcrDocumentType(documentCode: string): "PI" | "INV" | "PKL" | "BL" | null {
+  const code = documentCode.toUpperCase();
+  return code === "PI" || code === "INV" || code === "PKL" ? code : code === "BL" ? "BL" : null;
+}
+
 function normalizeDocKey(name: string): string {
   return name.toUpperCase().replace(/[^A-Z0-9_]/g, "");
 }
@@ -389,10 +406,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
   const [localUploads, setLocalUploads] = useState<Record<string, string>>({});
-  const [uploadingDocId, setUploadingDocId] = useState<string | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
-  const [editForm, setEditForm] = useState({ product: "", carrier: "" });
+  const [ocrUploadDocId, setOcrUploadDocId] = useState<string | null>(null);
+  const [ocrUploadFile, setOcrUploadFile] = useState<File | null>(null);
+  const [ocrUploadFileData, setOcrUploadFileData] = useState("");
+  const [ocrUploadFields, setOcrUploadFields] = useState<Record<string, string>>({});
+  const [isOcrAnalyzing, setIsOcrAnalyzing] = useState(false);
+  const [isOcrSaving, setIsOcrSaving] = useState(false);
+  const [ocrUploadError, setOcrUploadError] = useState("");
   const [selectedMissingDocIds, setSelectedMissingDocIds] = useState<string[]>([]);
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
@@ -401,16 +421,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     type: "success" | "error";
     message: string;
   } | null>(null);
-
-  useEffect(() => {
-    if (shipment) {
-      setEditForm({
-        product: shipment.shipName || "",
-        carrier: shipment.vessel || "",
-      });
-      setIsEditing(false);
-    }
-  }, [shipment?.id]);
 
   useEffect(() => {
     if (activeTab === "documents") {
@@ -525,35 +535,81 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const handleUploadSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     const docId = selectedMissingDocIds[0];
-    if (!file || !docId || !isAdmin || archived?.archived || uploadingDocId) return;
+    if (!file || !docId || !isAdmin || archived?.archived || isOcrAnalyzing || isOcrSaving) return;
     event.target.value = "";
-
-    setUploadingDocId(docId);
+    const documentType = getOcrDocumentType(docId);
+    setOcrUploadError("");
     try {
-      const dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Không đọc được file"));
-        reader.onerror = () => reject(new Error("Không đọc được file"));
-        reader.readAsDataURL(file);
-      });
-      const fileData = dataUrl.includes(",") ? dataUrl.split(",", 2)[1] : dataUrl;
+      if (!file.name.toLowerCase().endsWith(".pdf")) {
+        setOcrUploadError("Chứng từ chỉ hỗ trợ file PDF.");
+        return;
+      }
+      if (!documentType) {
+        setIsOcrSaving(true);
+        const fileData = await readFileAsBase64(file);
+        await uploadDocument({
+          action: "uploadDocument",
+          orderCode: shipment.orderCode,
+          documentCode: docId,
+          fileName: file.name,
+          fileData,
+        });
+        await checkDocumentsAndSaveStatus();
+        setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(file) }));
+        await onRefresh?.();
+        alert(`Đã bổ sung chứng từ ${docId}`);
+        return;
+      }
+      setOcrUploadFile(file);
+      setOcrUploadDocId(docId);
+      setIsOcrAnalyzing(true);
+      const fileData = await readFileAsBase64(file);
+      setOcrUploadFileData(fileData);
+      const result = await analyzeDocument({ documentType, file });
+      setOcrUploadFields(result.data && typeof result.data === "object" ? result.data : {});
+    } catch (error) {
+      setOcrUploadError(error instanceof Error ? error.message : "Không thể phân tích chứng từ");
+      setOcrUploadFile(null);
+      setOcrUploadDocId(null);
+      setOcrUploadFileData("");
+    } finally {
+      setIsOcrAnalyzing(false);
+      setIsOcrSaving(false);
+      setSelectedMissingDocIds([]);
+    }
+  };
 
+  const handleConfirmOcrUpload = async () => {
+    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !isAdmin || isOcrSaving) return;
+    setIsOcrSaving(true);
+    setOcrUploadError("");
+    try {
       await uploadDocument({
         action: "uploadDocument",
         orderCode: shipment.orderCode,
-        documentCode: docId,
-        fileName: file.name,
-        fileData,
+        documentCode: ocrUploadDocId,
+        fileName: ocrUploadFile.name,
+        fileData: ocrUploadFileData,
       });
+
+      const data = Object.fromEntries(
+      Object.entries(ocrUploadFields || {}).filter(([key, value]) => !key.startsWith("_") && value.trim()),
+      ) as Record<string, string>;
+      delete data.documentType;
+      delete data.fileName;
+      await editSummary({ action: "editSummary", orderCode: shipment.orderCode, data });
       await checkDocumentsAndSaveStatus();
-      setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(file) }));
+      setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: URL.createObjectURL(ocrUploadFile) }));
       await onRefresh?.();
-      alert(`Đã bổ sung chứng từ ${docId} thành công`);
+      setOcrUploadFile(null);
+      setOcrUploadDocId(null);
+      setOcrUploadFileData("");
+      setOcrUploadFields({});
+      alert(`Đã bổ sung và cập nhật chứng từ ${ocrUploadDocId}`);
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Không thể upload chứng từ");
+      setOcrUploadError(error instanceof Error ? error.message : "Không thể lưu chứng từ");
     } finally {
-      setUploadingDocId(null);
-      setSelectedMissingDocIds([]);
+      setIsOcrSaving(false);
     }
   };
 
@@ -572,42 +628,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     }
   };
 
-  const handleSaveEdit = async () => {
-    if (!isAdmin || isSavingEdit) return;
-    const data: Record<string, string | number> = {};
-    if (editForm.product !== (shipment.shipName || "")) data["Tên hàng"] = editForm.product;
-    if (editForm.carrier !== (shipment.vessel || "")) data["Hãng tàu"] = editForm.carrier;
-    if (Object.keys(data).length === 0) {
-      setIsEditing(false);
-      return;
-    }
-
-    setIsSavingEdit(true);
-    try {
-      await editSummary({ action: "editSummary", orderCode: shipment.orderCode, data });
-      await onRefresh?.();
-      setIsEditing(false);
-      alert("Đã cập nhật thông tin đơn hàng");
-    } catch (error) {
-      alert(error instanceof Error ? error.message : "Không thể cập nhật đơn hàng");
-    } finally {
-      setIsSavingEdit(false);
-    }
-  };
-
   return (
     <Modal isOpen={isOpen} onClose={onClose} className="mx-2 my-2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-3xl flex-col overflow-hidden sm:mx-4 sm:my-4 sm:max-h-[92vh] sm:w-full">
       {/* Header */}
       <div className="flex flex-col gap-3 border-b border-gray-100 px-4 pb-4 pt-5 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pb-4 sm:pt-6">
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={() => setIsEditing((current) => !current)}
-            className="absolute right-14 top-3 z-10 rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-600 transition hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 sm:right-20 sm:top-6"
-          >
-            {isEditing ? "Đóng sửa" : "Edit"}
-          </button>
-        )}
         <div className="min-w-0 flex flex-col gap-1 pr-10 sm:pr-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
             <h2 className="min-w-0 break-all text-base font-bold tracking-wide text-gray-900 dark:text-white sm:text-lg font-mono">
@@ -628,18 +652,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         </div>
 
         {/* Missing docs badge */}
-        {missingDocsCount > 0 && (
-          <div className="flex w-fit max-w-full flex-shrink-0 items-center gap-1.5 rounded-xl border border-error-100 bg-error-50 px-3 py-1.5 dark:border-error-500/20 dark:bg-error-500/10">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-error-500">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-              <line x1="12" y1="9" x2="12" y2="13"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-            <span className="text-xs font-semibold text-error-600 dark:text-error-400">
-              {missingDocsCount} giấy tờ thiếu
-            </span>
-          </div>
-        )}
       </div>
 
       {/* Tabs */}
@@ -670,40 +682,35 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         )}
       </div>
 
-      <input id="shipment-document-upload" type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.xls,.xlsx" onChange={handleUploadSelected} />
+      <input id="shipment-document-upload" type="file" className="hidden" accept=".pdf,application/pdf" onChange={handleUploadSelected} />
 
       {/* Tab Content */}
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 custom-scrollbar sm:px-6 sm:py-5">
 
-        {isEditing && (
+        {(isOcrAnalyzing || ocrUploadFile || ocrUploadError) && (
           <div className="mb-5 rounded-xl border border-brand-200 bg-brand-50/60 p-4 dark:border-brand-500/30 dark:bg-brand-500/10">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-brand-700 dark:text-brand-300">Chỉnh sửa thông tin đơn hàng</p>
-              <span className="text-[11px] text-gray-500">Order: {shipment.orderCode}</span>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {([
-                ["product", "Tên sản phẩm", "text"],
-                ["carrier", "Hãng tàu", "text"],
-              ] as const).map(([key, label, type]) => (
-                <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                  {label}
-                  <span className="relative block">
-                    <input
-                      id={`shipment-edit-${key}`}
-                      type={type}
-                      value={editForm[key]}
-                      onChange={(event) => setEditForm((current) => ({ ...current, [key]: event.target.value }))}
-                      className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                    />
-                  </span>
-                </label>
-              ))}
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setIsEditing(false)} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
-              <button type="button" onClick={handleSaveEdit} disabled={isSavingEdit} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingEdit ? "Đang lưu..." : "Lưu thay đổi"}</button>
-            </div>
+            <p className="text-sm font-semibold text-brand-700 dark:text-brand-300">
+              {isOcrAnalyzing ? "Đang phân tích chứng từ bằng OCR..." : `Kiểm tra dữ liệu ${ocrUploadDocId} trước khi lưu`}
+            </p>
+            {ocrUploadFile && !isOcrAnalyzing && (
+              <>
+                <p className="mt-1 text-xs text-gray-500">File: {ocrUploadFile.name} • Mã đơn: {shipment.orderCode}</p>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {Object.entries(ocrUploadFields || {}).filter(([key]) => !key.startsWith("_")).map(([key, value]) => (
+                    <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                      {key}
+                      <input type="text" value={value} onChange={(event) => setOcrUploadFields((current) => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                    </label>
+                  ))}
+                </div>
+                {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
+                <div className="mt-4 flex justify-end gap-2">
+                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadFields({}); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
+                  <button type="button" onClick={handleConfirmOcrUpload} disabled={isOcrSaving || !Object.values(ocrUploadFields || {}).some(Boolean)} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? "Đang lưu..." : "Xác nhận và lưu"}</button>
+                </div>
+              </>
+            )}
+            {ocrUploadError && !ocrUploadFile && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
           </div>
         )}
 
@@ -773,18 +780,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   {shipment.receivedDocs} / {shipment.totalDocs}
                 </span>
               </div>
-              {missingDocsCount > 0 && (
-                <div className="mt-2">
-                  <p className="text-xs text-error-600 dark:text-error-400">
-                    ⚠️ Còn thiếu {missingDocsCount} giấy tờ
-                  </p>
-                  {shipment.missingDocs && (
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400 break-words">
-                      {shipment.missingDocs}
-                    </p>
-                  )}
-                </div>
-              )}
+              
             </div>
           </div>
         )}
@@ -936,8 +932,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         {/* ── DOCUMENTS ── */}
         {activeTab === "documents" && (
           <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
-            {/* Missing docs alert */}
-            {missingDocs.length > 0 && (
+            {/* Missing docs alert removed: upload is available on each document row. */}
+            {false && missingDocs.length > 0 && (
               <div className="rounded-xl border border-error-200 bg-error-50 p-3 dark:border-error-500/20 dark:bg-error-500/10 sm:p-4">
                 <div className="flex items-start gap-3">
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-error-500 mt-0.5 flex-shrink-0">
@@ -958,7 +954,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           key={doc.id}
                           type="button"
                           onClick={() => handlePickUpload(doc.id)}
-                          disabled={!isAdmin || Boolean(archived?.archived) || Boolean(uploadingDocId)}
+                          disabled={!isAdmin || Boolean(archived?.archived) || isOcrAnalyzing || isOcrSaving}
                           aria-label={`Bổ sung ${doc.name}`}
                           className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors ${
                             localUploads[doc.id]
@@ -1068,8 +1064,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         </button>
                       )}
                       {doc.status !== "ok" && !archived?.archived && (
-                        <button type="button" disabled={!isAdmin || Boolean(uploadingDocId)} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
-                          {uploadingDocId === doc.id ? "Đang upload..." : localUploads[doc.id] ? "Đã chọn file" : "Bổ sung file"}
+                        <button type="button" disabled={!isAdmin || isOcrAnalyzing || isOcrSaving} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                          {isOcrAnalyzing && ocrUploadDocId === doc.id ? "Đang phân tích..." : localUploads[doc.id] ? "Đã chọn file" : "Bổ sung file"}
                         </button>
                       )}
                     </div>

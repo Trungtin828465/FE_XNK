@@ -88,7 +88,7 @@ export default function ShipmentStatusBar({ activeStage, stages, isLate, hasOutO
                     {stage.shortLabel}
                   </p>
                   <p className={`mt-0.5 text-[9px] leading-tight ${subCls[tone]}`}>
-                    {completed ? (stage.key === "delivered" ? "Thành công" : "Đã xong") : index === activeIndex ? "Chưa có PI" : "Chưa tới"}
+                    {completed ? (stage.key === "delivered" ? "Thành công" : "Đã xong") : index === activeIndex ? "Bổ sung INV PKL" : "Chưa tới"}
                   </p>
                 </div>
               </div>
