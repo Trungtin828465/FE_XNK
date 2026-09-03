@@ -21,6 +21,7 @@ interface ShipmentStatusBarProps {
   stages: ShipmentFlowStage[];
   isLate?: boolean;
   hasOutOfOrderDocs?: boolean;
+  activeStageMessage?: string;
 }
 
 const STAGE_ICON: Record<ShipmentFlowStageKey, React.ReactNode> = {
@@ -33,7 +34,7 @@ const STAGE_ICON: Record<ShipmentFlowStageKey, React.ReactNode> = {
   delivered: <span className="text-[10px] font-bold">OK</span>,
 };
 
-export default function ShipmentStatusBar({ activeStage, stages, isLate, hasOutOfOrderDocs }: ShipmentStatusBarProps) {
+export default function ShipmentStatusBar({ activeStage, stages, isLate, hasOutOfOrderDocs, activeStageMessage }: ShipmentStatusBarProps) {
   const activeIndex = Math.max(0, stages.findIndex((s) => s.key === activeStage));
 
   const getTone = (index: number) => {
@@ -88,6 +89,13 @@ export default function ShipmentStatusBar({ activeStage, stages, isLate, hasOutO
                     {stage.shortLabel}
                   </p>
                   <p className={`mt-0.5 text-[9px] leading-tight ${subCls[tone]}`}>
+                    {completed
+                      ? (stage.key === "delivered" ? "Thành công" : "Đã xong")
+                      : index === activeIndex
+                      ? activeStageMessage || "Đang xử lý"
+                      : "Chưa tới"}
+                  </p>
+                  <p className="hidden">
                     {completed ? (stage.key === "delivered" ? "Thành công" : "Đã xong") : index === activeIndex ? "Bổ sung INV PKL" : "Chưa tới"}
                   </p>
                 </div>

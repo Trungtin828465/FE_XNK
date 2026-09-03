@@ -68,6 +68,7 @@ function fileToBase64(file: File): Promise<string> {
 export default function CreateShipmentModal({ isOpen, onClose, onCreated, existingOrderCodes }: CreateShipmentModalProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
+  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [fileData, setFileData] = useState("");
   const [fields, setFields] = useState<ReviewFields>(EMPTY_FIELDS);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -80,6 +81,16 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       return () => window.clearTimeout(timer);
     }
   }, [isOpen, file]);
+
+  useEffect(() => {
+    if (!file) {
+      setFilePreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setFilePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
 
   const reset = () => {
     setFile(null);
@@ -181,12 +192,12 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   ];
 
   return (
-    <Modal isOpen={isOpen} onClose={handleClose} className="mx-4 flex max-h-[92vh] max-w-3xl flex-col overflow-hidden">
+    <Modal isOpen={isOpen} onClose={handleClose} className="mx-2 flex max-h-[96vh] max-w-5xl flex-col overflow-hidden sm:mx-4 sm:max-h-[94vh]">
       <div className="border-b border-gray-100 px-6 pb-4 pt-6 dark:border-gray-800">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Tạo đơn hàng mới</h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Chọn file PI để hệ thống OCR phân tích thông tin.</p>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-5">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-6 py-5 custom-scrollbar">
         <input ref={inputRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={handleFileChange} />
         <button type="button" onClick={() => inputRef.current?.click()} disabled={isAnalyzing || isSaving} className="rounded-xl border border-dashed border-brand-300 bg-brand-50 px-4 py-5 text-sm font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300">
           {file ? file.name : "Chọn file PI (PDF)"}
@@ -201,13 +212,19 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
             <div className="rounded-xl border border-warning-200 bg-warning-50 px-4 py-3 text-sm text-warning-700">
               Vui lòng kiểm tra lại thông tin OCR trước khi xác nhận tạo đơn.
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {reviewFields.map(([key, label]) => (
-                <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                  {label}
-                  <input type="text" value={fields[key]} onChange={(event) => updateField(key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
-                </label>
-              ))}
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]">
+              <div className="flex min-h-[120px] flex-col justify-center rounded-xl border border-gray-200 bg-gray-100 p-4 dark:border-gray-700 dark:bg-gray-900">
+                <p className="text-xs font-semibold text-gray-600 dark:text-gray-300">File PI đã chọn</p>
+                {filePreviewUrl && <a href={filePreviewUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-flex w-fit items-center rounded-lg bg-brand-500 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-600">Mở file để đối chiếu</a>}
+              </div>
+              <div className="grid content-start gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                {reviewFields.map(([key, label]) => (
+                  <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                    {label}
+                    <input type="text" value={fields[key]} onChange={(event) => updateField(key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                  </label>
+                ))}
+              </div>
             </div>
           </>
         )}

@@ -15,6 +15,15 @@ const DOCUMENT_CODES = [
   "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONG",
 ] as const;
 
+const FLOW_DOCUMENT_GROUPS: Array<{ key: Shipment["flowStageKey"]; docs: string[] }> = [
+  { key: "buying", docs: ["PI"] },
+  { key: "shipping", docs: ["INV", "PKL", "BL", "CO", "HC"] },
+  { key: "arrived", docs: ["DON_KD"] },
+  { key: "declared", docs: ["BB_LM", "PHI_TK", "THUE_NK", "TK"] },
+  { key: "fifteenb", docs: ["15B"] },
+  { key: "customs", docs: ["QDTQ", "MV"] },
+];
+
 export const SUMMARY_FIELDS = [
   "Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng",
   "INV", "Ngày INV", "Số hộp", "Trọng lượng", "Trọng lượng cả bì", "BL NO.",
@@ -96,6 +105,9 @@ function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, ind
   const docStatus = completeByDocuments ? 1 : Number(total?.status ?? 0);
   const completed = completeByDocuments;
   const eta = parseDate(getSheetValue(row, "ETA"));
+  const flowStageKey = completed
+    ? "delivered"
+    : FLOW_DOCUMENT_GROUPS.find((group) => group.docs.some((code) => !documents.some((document) => document.id === code && document.status === "ok")))?.key || "customs";
   // Giữ toàn bộ các cột thực tế mà backend trả về, không giới hạn ở danh sách
   // cố định để các cột mới trong sheet cũng xuất hiện trong tab Chi tiết.
   const summaryFields = Object.fromEntries(
@@ -128,7 +140,7 @@ function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, ind
     thuong: parseNumber(getSheetValue(row, "Số hộp")),
     trlg: parseNumber(getSheetValue(row, "Trọng lượng")),
     giaB: parseNumber(getSheetValue(row, "Giá tổng")),
-    flowStageKey: completed ? "delivered" : "shipping",
+    flowStageKey,
     flowStageLabel: completed ? "Hoàn thành" : "Đang xử lý",
     updatedAt: total?.time_update || new Date().toISOString(),
     summaryFields,
@@ -236,11 +248,33 @@ export function editSummary(payload: EditSummaryPayload): Promise<DriveDataRespo
 }
 
 export interface AnalyzeDocumentResponse { success: boolean; documentType: "PI" | "INV" | "PKL" | "BL"; fileName: string; data: Record<string, string>; _confidence?: number; ocrConfidence?: number; _reason?: string; models?: Record<string, string>; }
-export function analyzeDocument(payload: { documentType: "PI" | "INV" | "PKL" | "BL"; file: File }): Promise<AnalyzeDocumentResponse> {
+export async function analyzeDocument(payload: { documentType: "PI" | "INV" | "PKL" | "BL"; file: File }): Promise<AnalyzeDocumentResponse> {
   const formData = new FormData();
   formData.append("documentType", payload.documentType);
   formData.append("file", payload.file, payload.file.name);
-  return requestJson<AnalyzeDocumentResponse>("ocr/analyze", { method: "POST", body: formData });
+  const response = await requestJson<AnalyzeDocumentResponse | Record<string, unknown>>("ocr/analyze", { method: "POST", body: formData });
+  const raw = response && typeof response === "object" ? response : {};
+  const nestedData = raw.data && typeof raw.data === "object" && !Array.isArray(raw.data)
+    ? raw.data
+    : raw;
+  const data = Object.fromEntries(
+    Object.entries(nestedData).map(([key, value]) => [key, value == null ? "" : String(value)]),
+  );
+
+  // requestJson đã tự unwrap json.data. Chuẩn hóa lại để các modal luôn nhận
+  // được đúng dạng { success, documentType, fileName, data }.
+  return {
+    success: raw.success !== false,
+    documentType: raw.documentType === "PI" || raw.documentType === "INV" || raw.documentType === "PKL" || raw.documentType === "BL"
+      ? raw.documentType
+      : payload.documentType,
+    fileName: typeof raw.fileName === "string" ? raw.fileName : payload.file.name,
+    data,
+    _confidence: typeof raw._confidence === "number" ? raw._confidence : undefined,
+    ocrConfidence: typeof raw.ocrConfidence === "number" ? raw.ocrConfidence : undefined,
+    _reason: typeof raw._reason === "string" ? raw._reason : undefined,
+    models: raw.models && typeof raw.models === "object" ? raw.models as Record<string, string> : undefined,
+  };
 }
 
 export function computeMetrics(shipments: Shipment[]): ShipmentMetricsSummary {

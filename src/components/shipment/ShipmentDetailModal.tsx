@@ -438,6 +438,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isSavingDetails, setIsSavingDetails] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
+  const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
+  const [ocrFilePreviewUrl, setOcrFilePreviewUrl] = useState<string | null>(null);
   const [localUploads, setLocalUploads] = useState<Record<string, string>>({});
   const [ocrUploadDocId, setOcrUploadDocId] = useState<string | null>(null);
   const [ocrUploadFile, setOcrUploadFile] = useState<File | null>(null);
@@ -454,6 +456,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     type: "success" | "error";
     message: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (!ocrUploadFile) {
+      setOcrFilePreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(ocrUploadFile);
+    setOcrFilePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [ocrUploadFile]);
 
   useEffect(() => {
     if (activeTab === "documents") {
@@ -524,6 +536,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const isDocumentsComplete = shipment.docStatus === 1 || (
     shipment.totalDocs > 0 && shipment.receivedDocs >= shipment.totalDocs && missingDocs.length === 0
   );
+  const activeStageDocs = shipment.flowStageKey && shipment.flowStageKey !== "delivered"
+    ? STAGE_DOC_GROUPS[shipment.flowStageKey]
+    : [];
+  const activeMissingDocCodes = missingDocs
+    .map((document) => document.id)
+    .filter((code) => activeStageDocs.includes(code));
+  const activeStageMessage = activeMissingDocCodes.length > 0
+    ? `Thiếu ${activeMissingDocCodes.join(", ")}`
+    : "Đang xử lý";
   const selectedMissingIds = selectedMissingDocIds;
   const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
   // Tất cả hãng dùng chuỗi trước dấu phẩy trong cột BL NO.
@@ -585,31 +606,38 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleUploadSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files || []);
+    const file = files[0];
     const docId = selectedMissingDocIds[0];
     if (!file || !docId || !isAdmin || archived?.archived || isOcrAnalyzing || isOcrSaving) return;
     event.target.value = "";
     const documentType = getOcrDocumentType(docId);
     setOcrUploadError("");
     try {
-      if (!file.name.toLowerCase().endsWith(".pdf")) {
+      if (files.some((selectedFile) => !selectedFile.name.toLowerCase().endsWith(".pdf"))) {
         setOcrUploadError("Chứng từ chỉ hỗ trợ file PDF.");
+        return;
+      }
+      if (documentType && files.length > 1) {
+        setOcrUploadError("Chứng từ có OCR chỉ xử lý từng file một để xác nhận kết quả.");
         return;
       }
       if (!documentType) {
         setIsOcrSaving(true);
-        const fileData = await readFileAsBase64(file);
-        await uploadDocument({
-          action: "uploadDocument",
-          orderCode: shipment.orderCode,
-          documentCode: docId,
-          fileName: file.name,
-          fileData,
-        });
+        for (const selectedFile of files) {
+          const fileData = await readFileAsBase64(selectedFile);
+          await uploadDocument({
+            action: "uploadDocument",
+            orderCode: shipment.orderCode,
+            documentCode: docId,
+            fileName: selectedFile.name,
+            fileData,
+          });
+        }
         await checkDocumentsAndSaveStatus();
-        setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(file) }));
+        setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
         await onRefresh?.();
-        alert(`Đã bổ sung chứng từ ${docId}`);
+        alert(`Đã upload ${files.length} file chứng từ ${docId}`);
         return;
       }
       setOcrUploadFile(file);
@@ -620,7 +648,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       const result = await analyzeDocument({ documentType, file });
       setOcrUploadFields(result.data && typeof result.data === "object" ? result.data : {});
     } catch (error) {
-      setOcrUploadError(error instanceof Error ? error.message : "Không thể phân tích chứng từ");
+      setOcrUploadError(error instanceof Error ? error.message : "Không thể upload hoặc phân tích chứng từ");
       setOcrUploadFile(null);
       setOcrUploadDocId(null);
       setOcrUploadFileData("");
@@ -709,7 +737,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} className="mx-2 my-2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-3xl flex-col overflow-hidden sm:mx-4 sm:my-4 sm:max-h-[92vh] sm:w-full">
+    <>
+    <Modal isOpen={isOpen} onClose={onClose} className="mx-2 my-2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl flex-col overflow-hidden sm:mx-4 sm:my-4 sm:max-h-[94vh] sm:w-full">
       {/* Header */}
       <div className="flex flex-col gap-3 border-b border-gray-100 px-4 pb-4 pt-5 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pb-4 sm:pt-6">
         <div className="min-w-0 flex flex-col gap-1 pr-10 sm:pr-0">
@@ -755,10 +784,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       <input id="shipment-document-upload" type="file" className="hidden" accept=".pdf,application/pdf" onChange={handleUploadSelected} />
 
       {/* Tab Content */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 custom-scrollbar sm:px-6 sm:py-5">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 custom-scrollbar sm:px-6 sm:py-5">
 
         {(isOcrAnalyzing || ocrUploadFile || ocrUploadError) && (
-          <div className="mb-5 rounded-xl border border-brand-200 bg-brand-50/60 p-4 dark:border-brand-500/30 dark:bg-brand-500/10">
+          <div className="mb-5">
             <p className="text-sm font-semibold text-brand-700 dark:text-brand-300">
               {isOcrAnalyzing ? "Đang phân tích chứng từ bằng OCR..." : `Kiểm tra dữ liệu ${ocrUploadDocId} trước khi lưu`}
             </p>
@@ -766,16 +795,17 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               <>
                 <p className="mt-1 text-xs text-gray-500">File: {ocrUploadFile.name} • Mã đơn: {shipment.orderCode}</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  {Object.entries(ocrUploadFields || {}).filter(([key]) => !key.startsWith("_")).map(([key, value]) => (
-                    <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                      {key}
-                      <input type="text" value={value} onChange={(event) => setOcrUploadFields((current) => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
-                    </label>
-                  ))}
+                    {Object.entries(ocrUploadFields || {}).filter(([key]) => !key.startsWith("_")).map(([key, value]) => (
+                      <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                        {key}
+                        <input type="text" value={value} onChange={(event) => setOcrUploadFields((current) => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                      </label>
+                    ))}
                 </div>
                 {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
-                <div className="mt-4 flex justify-end gap-2">
+                <div className="mt-4 flex flex-wrap justify-end gap-2">
                   <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadFields({}); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
+                  <button type="button" onClick={() => { if (ocrUploadDocId && ocrFilePreviewUrl) setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: ocrFilePreviewUrl })); setActiveTab("documents"); }} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Xem file chứng từ</button>
                   <button type="button" onClick={handleConfirmOcrUpload} disabled={isOcrSaving || !Object.values(ocrUploadFields || {}).some(Boolean)} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? "Đang lưu..." : "Xác nhận và lưu"}</button>
                 </div>
               </>
@@ -819,6 +849,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 stages={FLOW_STAGES}
                 isLate={shipment.flowStageLate}
                 hasOutOfOrderDocs={hasStageWarning}
+                activeStageMessage={activeStageMessage}
               />
               <div className="mt-4 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-gray-800 dark:bg-gray-900 dark:text-white">
                 {flowLabel}
@@ -1146,9 +1177,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           </svg>
                         </button>
                       )}
-                      {doc.status !== "ok" && !archived?.archived && (
+                      {!archived?.archived && (
                         <button type="button" disabled={!isAdmin || isOcrAnalyzing || isOcrSaving} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
-                          {isOcrAnalyzing && ocrUploadDocId === doc.id ? "Đang phân tích..." : localUploads[doc.id] ? "Đã chọn file" : "Bổ sung file"}
+                          {isOcrAnalyzing && ocrUploadDocId === doc.id ? "Đang phân tích..." : doc.status === "ok" ? "Upload file khác" : localUploads[doc.id] ? "Upload lại" : "Bổ sung file"}
                         </button>
                       )}
                     </div>
@@ -1316,17 +1347,21 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           </div>
         )}
       </div>
-      {previewUrl && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={() => setPreviewUrl(null)}>
-          <div className="flex h-[80vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl bg-white shadow-xl dark:bg-gray-900" onClick={(event) => event.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-              <p className="truncate text-sm font-semibold text-gray-800 dark:text-white">{previewName}</p>
-              <button type="button" onClick={() => setPreviewUrl(null)} className="text-xl text-gray-500 hover:text-gray-800 dark:hover:text-white">×</button>
-            </div>
-            <iframe title={previewName} src={previewUrl} className="min-h-0 flex-1" />
-          </div>
-        </div>
-      )}
     </Modal>
+      {previewUrl && (
+        <aside className={`fixed right-0 top-0 z-[100000] flex h-screen flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isPreviewMaximized ? "w-full" : "w-[min(92vw,620px)]"}`}>
+          <div className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">
+            <p className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-white">{previewName}</p>
+            <button type="button" onClick={() => setIsPreviewMaximized((current) => !current)} className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={isPreviewMaximized ? "Thu nhỏ" : "Phóng to"}>
+              {isPreviewMaximized ? "Thu nhỏ" : "Phóng to"}
+            </button>
+            <button type="button" onClick={() => setPreviewUrl(null)} className="rounded-lg px-2 text-xl leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Đóng xem file">×</button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
+            <iframe title={previewName} src={previewUrl} className="h-full min-h-[calc(100vh-5rem)] w-full rounded-lg bg-white" />
+          </div>
+        </aside>
+      )}
+    </>
   );
 }

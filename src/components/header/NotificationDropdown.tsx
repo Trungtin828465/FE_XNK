@@ -1,34 +1,26 @@
 "use client";
 
 import { Modal } from "@/components/ui/modal";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
-import { getSheetNoti, updateNotificationStatus, type SheetNotification } from "@/services/shipmentApi";
+import { getSheetNoti, type SheetNotification } from "@/services/shipmentApi";
 
 type NotificationKind = "missing_docs" | "delivered";
 
 type NotificationRow = {
   id?: string;
+  name?: string;
   order_code?: string;
   type?: string;
   missing_docs?: string;
+  mss_docs?: string;
   message?: string;
   updated_by?: string;
+  update_by?: string;
   status?: string | number;
   created_at?: string;
-};
-
-type NotificationApiResponse = {
-  success?: boolean;
-  message?: string;
-  total?: number;
-  latest_count?: number;
-  latest_notifications?: NotificationRow[];
-  all_notifications?: NotificationRow[];
-  data?: {
-    data?: NotificationRow[];
-  };
+  date?: string;
 };
 
 type NotificationItem = {
@@ -57,22 +49,15 @@ function isMissingDocsType(type?: string) {
   return normalized === "THIEU_CHUNG_TU" || normalized === "MISSING_DOCS" || normalized === "MISSING";
 }
 
-function parseRows(json: NotificationApiResponse): NotificationRow[] {
-  if (Array.isArray(json.all_notifications)) return json.all_notifications;
-  if (Array.isArray(json.latest_notifications)) return json.latest_notifications;
-  if (Array.isArray(json.data?.data)) return json.data.data;
-  return [];
-}
-
 function mapRows(rows: NotificationRow[]): NotificationItem[] {
   return rows
     .map((row) => {
-      const type = String(row.type || "").trim();
+      const type = String(row.type || row.name || "").trim();
       const orderCode = String(row.order_code || "").trim();
-      const missingDocs = String(row.missing_docs || "").trim();
+      const missingDocs = String(row.missing_docs || row.mss_docs || "").trim();
       const message = String(row.message || "").trim();
-      const createdAt = String(row.created_at || (row as NotificationRow & { date?: string }).date || new Date().toISOString());
-      const updatedBy = String(row.updated_by || (row as NotificationRow & { update_by?: string }).update_by || "").trim();
+      const createdAt = String(row.created_at || row.date || new Date().toISOString());
+      const updatedBy = String(row.updated_by || row.update_by || "").trim();
       const delivered = isDeliveredType(type);
       const missing = isMissingDocsType(type) || (!delivered && Boolean(missingDocs || message));
 
@@ -99,10 +84,6 @@ function isUnread(item: NotificationItem) {
   return item.status === "0";
 }
 
-function getNotificationIdentity(item: NotificationItem) {
-  return `${item.id}-${item.orderCode}-${item.time}`;
-}
-
 function formatTime(iso: string) {
   return new Date(iso).toLocaleString("vi-VN", {
     day: "2-digit",
@@ -120,25 +101,6 @@ export default function NotificationDropdown() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [badgeCount, setBadgeCount] = useState(0);
-  const [hasNewNotification, setHasNewNotification] = useState(false);
-  const notificationStatusRef = useRef(new Map<string, string>());
-  const hasReceivedInitialPayloadRef = useRef(false);
-  const markNotificationsAsRead = async () => {
-    try {
-      await updateNotificationStatus();
-      const res = { ok: true, status: 200 };
-
-      if (!res.ok) throw new Error(`updateStatusNotification lỗi: ${res.status}`);
-
-      setNotifications((current) => current.map((item) => ({ ...item, status: "1" })));
-      setBadgeCount(0);
-      setHasNewNotification(false);
-      setError("");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Không thể cập nhật trạng thái thông báo");
-    }
-  };
-
   useEffect(() => {
     let cancelled = false;
     void getSheetNoti().then((rows: SheetNotification[]) => {
@@ -212,8 +174,6 @@ export default function NotificationDropdown() {
   const handleToggleNotifications = () => {
     setIsOpen((prev) => {
       const next = !prev;
-      if (next) void markNotificationsAsRead();
-      if (next) setHasNewNotification(false);
       return next;
     });
   };
@@ -226,7 +186,7 @@ export default function NotificationDropdown() {
         title="Thông báo"
       >
         {hasUnread ? (
-          <span className={`absolute -right-1 -top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white ${hasNewNotification ? "animate-pulse" : ""}`}>
+          <span className="absolute -right-1 -top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
             {badgeCount > 99 ? "99+" : badgeCount}
           </span>
         ) : null}
@@ -266,7 +226,7 @@ export default function NotificationDropdown() {
         </div>
 
         <div className="max-h-[420px] overflow-y-auto custom-scrollbar">
-          {hasNewNotification ? (
+          {false ? (
             <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-medium text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300">
               Có thông báo mới
             </div>
