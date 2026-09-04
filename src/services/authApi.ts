@@ -2,19 +2,6 @@ import type { AuthUser, LoginResponse } from "@/types/auth";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 const AUTH_STORAGE_KEY = "dashboard_auth_user";
-const FALLBACK_ADMIN_USERNAME = "admin";
-const FALLBACK_ADMIN_PASSWORD = "123456789";
-
-const fallbackAdmin: AuthUser = {
-  username: FALLBACK_ADMIN_USERNAME,
-  name: "Administrator",
-  role: "Admin",
-};
-
-function isFallbackAdminLogin(username: string, password: string): boolean {
-  return username.trim().toLowerCase() === FALLBACK_ADMIN_USERNAME
-    && password === FALLBACK_ADMIN_PASSWORD;
-}
 
 function storeUser(user: AuthUser): AuthUser {
   if (typeof window !== "undefined") {
@@ -85,21 +72,12 @@ export async function login(username: string, password: string): Promise<AuthUse
 
     const json = (await res.json().catch(() => ({}))) as LoginResponse;
 
-    // Chỉ fallback khi backend/database gặp lỗi server, không fallback khi sai mật khẩu.
-    if (res.status >= 500 && isFallbackAdminLogin(username, password)) {
-      return storeUser(fallbackAdmin);
-    }
-
     if (!res.ok) {
       throw new Error(json.message || "Login failed");
     }
 
     return storeUser(extractUser(json, username));
   } catch (error) {
-    // Khi backend/PostgreSQL không kết nối được, cho phép tài khoản dự phòng đăng nhập.
-    if (error instanceof TypeError && isFallbackAdminLogin(username, password)) {
-      return storeUser(fallbackAdmin);
-    }
     if (error instanceof TypeError) {
       throw new Error("Không thể kết nối đến máy chủ");
     }
