@@ -8,6 +8,8 @@ import { analyzeDocument, checkDocumentsAndSaveStatus, editReturnItem, editSumma
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
+import { useSystemNotification } from "@/context/SystemNotificationContext";
+import { useSystemConfirm } from "@/context/SystemConfirmContext";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 
@@ -471,6 +473,8 @@ function pickRecipient(shipment: Shipment) {
 
 export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefresh }: ShipmentDetailModalProps) {
   const { user } = useAuth();
+  const { notify } = useSystemNotification();
+  const { confirm } = useSystemConfirm();
   const [activeTab, setActiveTab] = useState<ModalTab>("overview");
   const [archived, setArchived] = useState<ArchivedDocumentsResponse | null>(null);
   const [isArchiveLoading, setIsArchiveLoading] = useState(false);
@@ -703,7 +707,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         });
         setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
         await onRefresh?.();
-        alert(`Đã upload ${files.length} file chứng từ ${docId}`);
+        notify(`Đã upload ${files.length} file chứng từ ${docId}`, "success");
         return;
       }
       setOcrUploadFile(file);
@@ -767,7 +771,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadDocId(null);
       setOcrUploadFileData("");
       setOcrUploadFields({});
-      alert(`Đã bổ sung và cập nhật chứng từ ${ocrUploadDocId}`);
+      notify(`Đã bổ sung và cập nhật chứng từ ${ocrUploadDocId}`, "success");
     } catch (error) {
       setOcrUploadError(error instanceof Error ? error.message : "Không thể lưu chứng từ");
     } finally {
@@ -791,8 +795,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       const result = await getArchivedDocuments(shipment.orderCode);
       setArchived(result);
       setActiveTab("documents");
+      notify(`Đã lưu trữ hồ sơ đơn ${shipment.orderCode}`, "success");
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Không thể lưu trữ hồ sơ");
+      notify(error instanceof Error ? error.message : "Không thể lưu trữ hồ sơ", "error");
     } finally {
       setIsArchiveLoading(false);
     }
@@ -820,9 +825,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       });
       await onRefresh?.();
       setIsDetailsEditing(false);
-      alert("Đã cập nhật chi tiết đơn hàng");
+      notify("Đã cập nhật chi tiết đơn hàng", "success");
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Không thể cập nhật chi tiết đơn hàng");
+      notify(error instanceof Error ? error.message : "Không thể cập nhật chi tiết đơn hàng", "error");
     } finally {
       setIsSavingDetails(false);
     }
@@ -836,9 +841,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         action: "editReturnItem",
         orderCode: shipment.orderCode,
         data: {
+          "SỐ HĐ": shipment.orderCode,
           "NGÀY": returnForm.ngay,
           "SỐ CONT": returnForm.soCont,
-          "SỐ HĐ": shipment.orderCode,
           "NHÀ XE": returnForm.nhaXe,
           "XE_TÀI": returnForm.xeTai,
           "NƠI LẤY HÀNG": returnForm.noiLayHang,
@@ -856,9 +861,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setReturnItem(refreshed);
       setReturnForm(refreshed || returnForm);
       setIsReturnEditing(false);
-      alert("Đã cập nhật thông tin hạ rỗng");
+      notify("Đã cập nhật thông tin hạ rỗng", "success");
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Không thể cập nhật thông tin hạ rỗng");
+      notify(error instanceof Error ? error.message : "Không thể cập nhật thông tin hạ rỗng", "error");
     } finally {
       setIsSavingReturn(false);
     }
@@ -867,9 +872,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const handleCancelOrder = async () => {
     if (!canCancelShipment || isCancelling) return;
 
-    const confirmed = window.confirm(
-      `Xác nhận chuyển đơn ${shipment.orderCode} sang trạng thái Hủy? Dữ liệu và file chứng từ vẫn được giữ nguyên.`,
-    );
+    const confirmed = await confirm({
+      title: "Xác nhận hủy đơn hàng",
+      message: `Bạn có chắc muốn chuyển đơn ${shipment.orderCode} sang trạng thái Hủy? Dữ liệu và file chứng từ vẫn được giữ nguyên.`,
+      confirmText: "Hủy đơn",
+      cancelText: "Quay lại",
+      tone: "danger",
+    });
     if (!confirmed) return;
 
     setIsCancelling(true);
@@ -885,10 +894,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         detail: `Chuyển đơn ${shipment.orderCode} sang trạng thái Hủy`,
       });
       await onRefresh?.();
-      alert(`Đã chuyển đơn ${shipment.orderCode} sang trạng thái Hủy`);
+      notify(`Đã chuyển đơn ${shipment.orderCode} sang trạng thái Hủy`, "success");
       onClose();
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Không thể cập nhật trạng thái đơn hàng");
+      notify(error instanceof Error ? error.message : "Không thể cập nhật trạng thái đơn hàng", "error");
     } finally {
       setIsCancelling(false);
     }

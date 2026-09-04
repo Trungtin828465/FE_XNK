@@ -6,6 +6,7 @@ import { analyzeDocument, editSummary, uploadDocument } from "@/services/shipmen
 import { useAuth } from "@/context/AuthContext";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
+import { useSystemNotification } from "@/context/SystemNotificationContext";
 
 interface CreateShipmentModalProps {
   isOpen: boolean;
@@ -67,6 +68,7 @@ function fileToBase64(file: File): Promise<string> {
 
 export default function CreateShipmentModal({ isOpen, onClose, onCreated, existingOrderCodes }: CreateShipmentModalProps) {
   const { user } = useAuth();
+  const { notify } = useSystemNotification();
   const canCreateShipment = canPerformShipmentAction(user, "createShipment");
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -184,6 +186,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         detail: `Tạo đơn hàng ${fields.orderCode.trim()}`,
       });
       await onCreated();
+      notify(`Đã tạo đơn hàng ${fields.orderCode.trim()}`, "success");
       handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Không thể tạo đơn hàng mới");
