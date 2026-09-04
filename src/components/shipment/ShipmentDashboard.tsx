@@ -9,6 +9,7 @@ import ShipmentTable from "./ShipmentTable";
 import ShipmentDetailModal from "./ShipmentDetailModal";
 import CreateShipmentModal from "./CreateShipmentModal";
 import { useAuth } from "@/context/AuthContext";
+import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 
 type FilterAliasType = "supplier" | "vessel" | "port";
 
@@ -112,7 +113,7 @@ function buildFilterOptions(type: FilterAliasType, values: Array<string | undefi
 
 export default function ShipmentDashboard() {
   const { user } = useAuth();
-  const isAdmin = user?.role?.trim().toLowerCase() === "admin";
+  const canCreateShipment = canPerformShipmentAction(user, "createShipment");
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
   const [updatedBy, setUpdatedBy] = useState<string>("");
@@ -256,7 +257,7 @@ export default function ShipmentDashboard() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-        {isAdmin && (
+        {canCreateShipment && (
           <button type="button" onClick={() => setIsCreateModalOpen(true)} className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600">
             + Tạo đơn hàng mới
           </button>

@@ -3,6 +3,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import { analyzeDocument, editSummary, uploadDocument } from "@/services/shipmentApi";
+import { useAuth } from "@/context/AuthContext";
+import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
+import { recordActivity } from "@/services/activityLogApi";
 
 interface CreateShipmentModalProps {
   isOpen: boolean;
@@ -63,6 +66,8 @@ function fileToBase64(file: File): Promise<string> {
 }
 
 export default function CreateShipmentModal({ isOpen, onClose, onCreated, existingOrderCodes }: CreateShipmentModalProps) {
+  const { user } = useAuth();
+  const canCreateShipment = canPerformShipmentAction(user, "createShipment");
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
@@ -108,6 +113,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canCreateShipment) return;
     const selected = event.target.files?.[0];
     event.target.value = "";
     if (!selected) return;
@@ -143,7 +149,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   ));
 
   const handleConfirm = async () => {
-    if (!file || !fileData || isSaving) return;
+    if (!canCreateShipment || !file || !fileData || isSaving) return;
     if (duplicateOrderCode) {
       setError(`Mã PI ${fields.orderCode.trim()} đã tồn tại trong danh sách đơn hàng.`);
       return;
@@ -172,6 +178,11 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         "Giá tổng": fields.totalPrice.trim(),
       };
       await editSummary({ action: "editSummary", orderCode: fields.orderCode.trim(), data });
+      recordActivity(user, {
+        action: "CREATE_SHIPMENT",
+        location: "ShipmentDashboard/CreateShipmentModal",
+        detail: `Tạo đơn hàng ${fields.orderCode.trim()}`,
+      });
       await onCreated();
       handleClose();
     } catch (err) {
@@ -199,7 +210,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-6 py-5 custom-scrollbar">
         <input ref={inputRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={handleFileChange} />
-        <button type="button" onClick={() => inputRef.current?.click()} disabled={isAnalyzing || isSaving} className="rounded-xl border border-dashed border-brand-300 bg-brand-50 px-4 py-5 text-sm font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300">
+        <button type="button" onClick={() => inputRef.current?.click()} disabled={!canCreateShipment || isAnalyzing || isSaving} className="rounded-xl border border-dashed border-brand-300 bg-brand-50 px-4 py-5 text-sm font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300">
           {file ? file.name : "Chọn file PI (PDF)"}
         </button>
 
@@ -232,7 +243,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 px-6 py-4 dark:border-gray-800">
         {filePreviewUrl && <button type="button" onClick={() => setIsFilePanelOpen(true)} className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Xem file PI</button>}
         <button type="button" onClick={handleClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
-        <button type="button" onClick={handleConfirm} disabled={!file || isAnalyzing || isSaving || duplicateOrderCode} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Đang lưu..." : "Xác nhận tạo đơn"}</button>
+        <button type="button" onClick={handleConfirm} disabled={!canCreateShipment || !file || isAnalyzing || isSaving || duplicateOrderCode} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Đang lưu..." : "Xác nhận tạo đơn"}</button>
       </div>
     </Modal>
       {isFilePanelOpen && filePreviewUrl && (

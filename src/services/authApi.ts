@@ -29,10 +29,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeUser(payload: unknown, fallbackUsername: string): AuthUser {
   if (isRecord(payload)) {
+    const rawId = payload.id ?? payload.userId ?? payload.user_id;
+    const id = Number(rawId);
     const username = String(payload.username ?? payload.userName ?? fallbackUsername).trim() || fallbackUsername;
     const name = String(payload.name ?? payload.fullName ?? payload.full_name ?? username).trim() || username;
     const role = String(payload.role ?? payload.userRole ?? payload.position ?? "User").trim() || "User";
-    return { username, name, role };
+    const session = String(payload.session ?? payload.sessionId ?? payload.session_id ?? "").trim() || undefined;
+    const token = String(payload.token ?? payload.accessToken ?? payload.access_token ?? "").trim() || undefined;
+    return { id: Number.isInteger(id) && id > 0 ? id : undefined, username, name, role, session, token };
   }
 
   return {
@@ -43,19 +47,30 @@ function normalizeUser(payload: unknown, fallbackUsername: string): AuthUser {
 }
 
 function extractUser(json: LoginResponse, fallbackUsername: string): AuthUser {
-  if (isRecord(json.data)) {
-    return normalizeUser(json.data, fallbackUsername);
+  let user: AuthUser;
+  if (isRecord(json.data) && isRecord(json.data.user)) {
+    user = normalizeUser(json.data.user, fallbackUsername);
+  } else if (isRecord(json.data)) {
+    user = normalizeUser(json.data, fallbackUsername);
+  } else if (Array.isArray(json.data) && json.data.length > 0) {
+    user = normalizeUser(json.data[0], fallbackUsername);
+  } else if (isRecord(json.user)) {
+    user = normalizeUser(json.user, fallbackUsername);
+  } else {
+    user = normalizeUser(json, fallbackUsername);
   }
-
-  if (Array.isArray(json.data) && json.data.length > 0) {
-    return normalizeUser(json.data[0], fallbackUsername);
-  }
-
-  if (isRecord(json.user)) {
-    return normalizeUser(json.user, fallbackUsername);
-  }
-
-  return normalizeUser(json, fallbackUsername);
+  const data = isRecord(json.data) ? json.data : {};
+  const topLevelToken = String(
+    json.token ?? json.accessToken ?? json.access_token ?? data.token ?? data.accessToken ?? data.access_token ?? "",
+  ).trim() || undefined;
+  const topLevelSession = String(
+    json.session ?? json.sessionId ?? json.session_id ?? data.session ?? data.sessionId ?? data.session_id ?? "",
+  ).trim() || undefined;
+  return {
+    ...user,
+    token: user.token || topLevelToken,
+    session: user.session || topLevelSession || topLevelToken,
+  };
 }
 
 export async function login(username: string, password: string): Promise<AuthUser> {
