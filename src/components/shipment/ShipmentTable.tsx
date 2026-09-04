@@ -11,6 +11,7 @@ interface ShipmentTableProps {
 const PAGE_SIZE = 10;
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; dot: string }> = {
+  cancelled: { label: "Đã hủy", color: "text-error-600 dark:text-error-400", bg: "bg-error-50 dark:bg-error-500/10", dot: "bg-error-500" },
   buying: { label: "Lên đơn hàng", color: "text-amber-700", bg: "bg-amber-50 dark:bg-amber-500/10", dot: "bg-amber-500" },
   shipping: { label: "Xin giấy phép / Vận chuyển biển", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
   arrived: { label: "Đã đến cảng", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
@@ -98,8 +99,9 @@ function ShipmentCard({
   shipment: Shipment;
   onClick: () => void;
 }) {
-  const statusKey = shipment.flowStageKey || "buying";
+  const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
   const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.buying;
+  const statusLabel = shipment.status === "cancelled" ? sc.label : shipment.flowStageLabel || sc.label;
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -167,10 +169,10 @@ function ShipmentCard({
       <div className="mt-3 flex min-w-0 items-center justify-between gap-3 border-t border-gray-100 pt-3 dark:border-gray-700">
         <span
           className={`inline-flex max-w-[62%] min-w-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${sc.color} ${sc.bg}`}
-          title={shipment.flowStageLabel || sc.label}
+          title={statusLabel}
         >
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${sc.dot}`} />
-          <span className="truncate">{shipment.flowStageLabel || sc.label}</span>
+          <span className="truncate">{statusLabel}</span>
         </span>
         <DocBar total={shipment.totalDocs} received={shipment.receivedDocs} missingList={shipment.missingDocs} />
       </div>
@@ -180,7 +182,7 @@ function ShipmentCard({
 
 export default function ShipmentTable({ shipments, onRowClick, onReload }: ShipmentTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("eta");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
   const [isReloading, setIsReloading] = useState(false);
 
@@ -214,16 +216,19 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
         return sortDir === "asc" ? cmp : -cmp;
       }
       if (sortKey === "eta") {
-        const etaA = a.eta ? Date.parse(`${a.eta}T00:00:00`) : null;
-        const etaB = b.eta ? Date.parse(`${b.eta}T00:00:00`) : null;
+        const parsedEtaA = a.eta ? Date.parse(a.eta) : Number.NaN;
+        const parsedEtaB = b.eta ? Date.parse(b.eta) : Number.NaN;
+        const etaA = Number.isFinite(parsedEtaA) ? parsedEtaA : null;
+        const etaB = Number.isFinite(parsedEtaB) ? parsedEtaB : null;
 
-        // Đưa các đơn chưa có ETA xuống cuối danh sách ở cả hai chiều.
-        if (etaA === null && etaB === null) return 0;
+        // ETA gần nhất được ưu tiên; đơn thiếu ETA hoặc ETA sai định dạng luôn nằm cuối.
+        if (etaA === null && etaB === null) return a.orderCode.localeCompare(b.orderCode, "vi");
         if (etaA === null) return 1;
         if (etaB === null) return -1;
 
         const cmp = etaA < etaB ? -1 : etaA > etaB ? 1 : 0;
-        return sortDir === "asc" ? cmp : -cmp;
+        if (cmp !== 0) return sortDir === "asc" ? cmp : -cmp;
+        return a.orderCode.localeCompare(b.orderCode, "vi");
       }
       va = a[sortKey as keyof Shipment] as string | undefined;
       vb = b[sortKey as keyof Shipment] as string | undefined;
@@ -383,8 +388,9 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
               </tr>
             ) : (
               paged.map((shipment, rowIdx) => {
-                const statusKey = shipment.flowStageKey || "buying";
+                const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
                 const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.buying;
+                const statusLabel = shipment.status === "cancelled" ? sc.label : shipment.flowStageLabel || sc.label;
                 const rowNum = (safePage - 1) * PAGE_SIZE + rowIdx + 1;
                 return (
                   <tr
@@ -479,10 +485,10 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
                       <div className="flex flex-col items-start gap-1">
                         <span
                           className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${sc.color} ${sc.bg}`}
-                          title={shipment.flowStageLabel || sc.label}
+                          title={statusLabel}
                         >
                           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sc.dot}`} />
-                          <span className="truncate">{shipment.flowStageLabel || sc.label}</span>
+                          <span className="truncate">{statusLabel}</span>
                         </span>
                         {shipment.soldAtSea && (
                           <span className="text-[10px] ml-3 font-semibold text-success-600 dark:text-success-400">

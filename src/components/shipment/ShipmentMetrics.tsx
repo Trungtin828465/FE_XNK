@@ -103,9 +103,9 @@ export default function ShipmentMetrics({ metrics, activeFilter, onFilterChange 
       ),
     },
     {
-      key: "missing_docs" as const,
-      label: "Thiếu giấy tờ",
-      value: metrics.missing_docs,
+      key: "cancelled" as const,
+      label: "Đơn hủy",
+      value: metrics.cancelled,
       colorClass: "text-error-600",
       bgClass: "bg-error-50 dark:bg-error-500/10",
       borderClass: "border-error-300 dark:border-error-500/40",

@@ -5,10 +5,11 @@
 export type ShipmentStatus =
   | "shipping"      // Đang vận chuyển (chưa đến ETA)
   | "completed"     // Hoàn thành (đã qua ETA + đủ giấy tờ)
-  | "missing_docs"; // Thiếu chứng từ (status = 0 từ getSheetTotal)
+  | "missing_docs"  // Thiếu chứng từ (status = 0 từ getSheetTotal)
+  | "cancelled";    // Đơn đã hủy (giữ nguyên dữ liệu, chỉ đổi trạng thái)
 
 export type DocumentStatus = "ok" | "missing" | "pending" | "expired";
-export type ShipmentFilterStatus = ShipmentStatus | "sold_at_sea";
+export type ShipmentFilterStatus = ShipmentStatus;
 
 export type JourneyStage =
   | "origin_port"       // Cảng xuất phát (A)
@@ -116,7 +117,7 @@ export interface ShipmentMetricsSummary {
   total: number;
   completed: number;
   shipping: number;
-  missing_docs: number;
+  cancelled: number;
 }
 
 export interface ShipmentFilter {

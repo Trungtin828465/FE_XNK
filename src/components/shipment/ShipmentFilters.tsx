@@ -14,8 +14,7 @@ const STATUS_OPTIONS: { value: ShipmentFilterStatus | "all"; label: string }[] =
   { value: "all", label: "Tất cả trạng thái" },
   { value: "shipping", label: "Đang vận chuyển" },
   { value: "completed", label: "Hoàn thành" },
-  { value: "missing_docs", label: "Thiếu giấy tờ" },
-  { value: "sold_at_sea", label: "Đã bán trên biển" },
+  { value: "cancelled", label: "Đơn hủy" },
 ];
 
 const inputCls =

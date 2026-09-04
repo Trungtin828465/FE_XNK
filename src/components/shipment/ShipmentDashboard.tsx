@@ -79,7 +79,7 @@ export default function ShipmentDashboard() {
     setFilter(newFilter);
     if (newFilter.status !== undefined) {
       const metricStatus: ShipmentStatus | "all" =
-        newFilter.status === "sold_at_sea"
+        newFilter.status === "cancelled"
           ? "all"
           : newFilter.status as ShipmentStatus | "all";
       setActiveMetricFilter(metricStatus);
@@ -103,7 +103,7 @@ export default function ShipmentDashboard() {
       const statusOk = (() => {
         const selectedStatus = filter.status as ShipmentFilterStatus | "all" | undefined;
         if (!selectedStatus || selectedStatus === "all") return true;
-        if (selectedStatus === "sold_at_sea") return Boolean(s.soldAtSea);
+        if (selectedStatus === "cancelled") return s.status === "cancelled";
         return s.status === selectedStatus;
       })();
 

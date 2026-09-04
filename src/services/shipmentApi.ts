@@ -62,10 +62,22 @@ function getSheetValue(row: Record<string, unknown>, field: string): string {
 function parseDate(value: unknown): string | undefined {
   const raw = String(value ?? "").trim().split(",")[0].trim();
   if (!raw) return undefined;
-  const usDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  const date = usDate
-    ? new Date(Number(usDate[3]), Number(usDate[1]) - 1, Number(usDate[2]))
-    : new Date(raw);
+  const slashDate = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (slashDate) {
+    const first = Number(slashDate[1]);
+    const second = Number(slashDate[2]);
+    const year = Number(slashDate[3]);
+    // Sheet hiện tại chủ yếu dùng MM/DD/YYYY; nếu số đầu > 12 thì nhận là DD/MM/YYYY.
+    const month = first > 12 ? second : first;
+    const day = first > 12 ? first : second;
+    const date = new Date(year, month - 1, day);
+    if (
+      month < 1 || month > 12 || day < 1 || day > 31 ||
+      date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day
+    ) return undefined;
+    return date.toISOString().split("T")[0];
+  }
+  const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString().split("T")[0];
 }
 
@@ -103,7 +115,9 @@ function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, ind
   // cột status nhưng toàn bộ 15 chứng từ đã tồn tại.
   const completeByDocuments = receivedDocs === totalDocs && totalDocs > 0;
   const docStatus = completeByDocuments ? 1 : Number(total?.status ?? 0);
-  const completed = completeByDocuments;
+  const statusValue = getSheetValue(row, "Trạng thái").trim().toLowerCase();
+  const isCancelled = ["hủy", "huy", "đã hủy", "da huy", "cancelled", "canceled"].includes(statusValue);
+  const completed = !isCancelled && completeByDocuments;
   const eta = parseDate(getSheetValue(row, "ETA"));
   const flowStageKey = completed
     ? "delivered"
@@ -129,7 +143,7 @@ function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, ind
     eta,
     port: getSheetValue(row, "Cảng đến") || undefined,
     contCount: undefined,
-    status: completed ? "completed" : receivedDocs === 0 ? "missing_docs" : "shipping",
+    status: isCancelled ? "cancelled" : completed ? "completed" : receivedDocs === 0 ? "missing_docs" : "shipping",
     docStatus,
     totalDocs,
     receivedDocs,
@@ -183,7 +197,9 @@ export async function fetchSheetSummaryRows(): Promise<{ rows: SheetSummaryRow[]
 
 export async function fetchShipments(): Promise<{ shipments: Shipment[]; lastUpdated: string; updatedBy: string }> {
   const [{ rows, updatedAt }, totalMap] = await Promise.all([fetchSheetSummaryRows(), fetchSheetTotalMap()]);
-  const shipments = rows.map((row, index) => mapShipment(row, totalMap.get(getSheetValue(row, "Số HĐ")), index)).filter((shipment) => shipment.orderCode);
+  const shipments = rows
+    .map((row, index) => mapShipment(row, totalMap.get(getSheetValue(row, "Số HĐ")), index))
+    .filter((shipment) => shipment.orderCode);
   return { shipments, lastUpdated: updatedAt, updatedBy: "" };
 }
 
@@ -296,6 +312,6 @@ export function computeMetrics(shipments: Shipment[]): ShipmentMetricsSummary {
     total: shipments.length,
     completed: shipments.filter((shipment) => shipment.status === "completed").length,
     shipping: shipments.filter((shipment) => shipment.status === "shipping").length,
-    missing_docs: shipments.filter((shipment) => shipment.status === "missing_docs").length,
+    cancelled: shipments.filter((shipment) => shipment.status === "cancelled").length,
   };
 }

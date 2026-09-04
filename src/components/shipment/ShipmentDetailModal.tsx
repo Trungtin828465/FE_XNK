@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
-import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
+import type { ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
 import { analyzeDocument, checkDocumentsAndSaveStatus, editReturnItem, editSummary, fetchReturnItem, getArchivedDocuments, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
@@ -96,6 +96,7 @@ const RETURN_FIELDS: { key: keyof ReturnItem; label: string }[] = [
 ];
 
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string; dot: string }> = {
+  cancelled:    { label: "Đã hủy",           color: "text-red-600",         bg: "bg-red-100 dark:bg-gray-500/10", dot: "bg-gray-500" },
   shipping:     { label: "Đang vận chuyển", color: "text-blue-light-600",   bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
   completed:    { label: "Hoàn thành",       color: "text-success-600",      bg: "bg-success-50 dark:bg-success-500/10", dot: "bg-success-500" },
   missing_docs: { label: "Thiếu giấy tờ",   color: "text-error-600",        bg: "bg-error-50 dark:bg-error-500/10", dot: "bg-error-500" },
@@ -266,6 +267,22 @@ function InfoRow({ label, value, mono = false }: { label: string; value?: string
       <span className={`min-w-0 break-words text-sm font-medium text-gray-800 dark:text-white/90 ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
+}
+
+function getSummaryValue(fields: Record<string, string> | undefined, candidates: string[]): string {
+  if (!fields) return "";
+  const normalize = (value: string) => value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  const entries = Object.entries(fields);
+  for (const candidate of candidates) {
+    const wanted = normalize(candidate);
+    const match = entries.find(([field]) => normalize(field) === wanted);
+    if (match && match[1]?.trim()) return match[1].trim();
+  }
+  return "";
 }
 
 function formatDate(iso?: string): string {
@@ -446,6 +463,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isDetailsEditing, setIsDetailsEditing] = useState(false);
   const [detailForm, setDetailForm] = useState<Record<string, string>>({});
   const [isSavingDetails, setIsSavingDetails] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
   const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
@@ -514,8 +532,23 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   if (!shipment) return null;
 
+  const isCancelled = shipment.status === "cancelled";
+  const canManage = isAdmin && !isCancelled;
+  const summaryFields = shipment.summaryFields;
+  const overviewInfo = {
+    invoice: getSummaryValue(summaryFields, ["INV", "Mã INV", "Số INV"]),
+    container: getSummaryValue(summaryFields, ["Số Container", "Mã Container", "Số cont", "Container"]),
+    packageCount: getSummaryValue(summaryFields, ["Số kiện hàng", "Số kiện", "Số hộp"]),
+    netWeight: getSummaryValue(summaryFields, ["Net weight", "Trọng lượng", "Trọng lượng tịnh"]),
+    grossWeight: getSummaryValue(summaryFields, ["Gross weight", "Trọng lượng cả bì", "Trọng lượng tổng"]),
+    goodsValue: getSummaryValue(summaryFields, ["Tiền hàng", "Giá tổng", "Trị giá", "Tổng tiền"]),
+    releaseOrder: getSummaryValue(summaryFields, ["Lệnh thả hàng", "Lệnh giao hàng", "Telex", "Telex release"]),
+  };
+  // Tạm ẩn cột STT trong tab Chi tiết; dữ liệu gốc trong Sheet vẫn được giữ nguyên.
+  const detailFields = (Object.keys(detailForm).length > 0 ? Object.keys(detailForm) : [...SUMMARY_FIELDS])
+    .filter((field) => field.trim().toLowerCase() !== "stt");
   const statusInfo = STATUS_MAP[shipment.status];
-  const flowLabel = shipment.flowStageLabel || statusInfo?.label;
+  const flowLabel = isCancelled ? statusInfo?.label : shipment.flowStageLabel || statusInfo?.label;
   const hasStageWarning = hasOutOfOrderDocuments(shipment);
   // const flowColor = shipment.flowStageKey === "delivered"
   //   ? "text-success-600 bg-success-50 dark:bg-success-500/10"
@@ -527,7 +560,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   //   ? "text-error-600 bg-error-50 dark:bg-error-500/10"
   //   : "text-blue-light-600 bg-blue-light-50 dark:bg-blue-light-500/10";
 
-  const flowColor = shipment.flowStageKey === "delivered"
+  const flowColor = isCancelled
+  ? "text-gray-600 bg-gray-100 dark:bg-gray-500/10 dark:text-gray-300"
+  : shipment.flowStageKey === "delivered"
   ? "text-success-600 bg-success-50 dark:bg-success-500/10"
 
   : shipment.flowStageKey === "buying"
@@ -548,15 +583,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const isDocumentsComplete = shipment.docStatus === 1 || (
     shipment.totalDocs > 0 && shipment.receivedDocs >= shipment.totalDocs && missingDocs.length === 0
   );
-  const activeStageDocs = shipment.flowStageKey && shipment.flowStageKey !== "delivered"
-    ? STAGE_DOC_GROUPS[shipment.flowStageKey]
-    : [];
-  const activeMissingDocCodes = missingDocs
-    .map((document) => document.id)
-    .filter((code) => activeStageDocs.includes(code));
-  const activeStageMessage = activeMissingDocCodes.length > 0
-    ? `Thiếu ${activeMissingDocCodes.join(", ")}`
-    : "Đang xử lý";
   const selectedMissingIds = selectedMissingDocIds;
   const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
   // Tất cả hãng dùng chuỗi trước dấu phẩy trong cột BL NO.
@@ -612,7 +638,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handlePickUpload = (docId: string) => {
-    if (!isAdmin || archived?.archived) return;
+    if (!canManage || archived?.archived) return;
     setSelectedMissingDocIds([docId]);
     window.setTimeout(() => document.getElementById("shipment-document-upload")?.click(), 0);
   };
@@ -621,7 +647,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const files = Array.from(event.target.files || []);
     const file = files[0];
     const docId = selectedMissingDocIds[0];
-    if (!file || !docId || !isAdmin || archived?.archived || isOcrAnalyzing || isOcrSaving) return;
+    if (!file || !docId || !canManage || archived?.archived || isOcrAnalyzing || isOcrSaving) return;
     event.target.value = "";
     const documentType = getOcrDocumentType(docId);
     setOcrUploadError("");
@@ -672,7 +698,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleConfirmOcrUpload = async () => {
-    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !isAdmin || isOcrSaving) return;
+    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !canManage || isOcrSaving) return;
     setIsOcrSaving(true);
     setOcrUploadError("");
     try {
@@ -706,7 +732,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleArchive = async () => {
-    if (!isAdmin || !isDocumentsComplete || archived?.archived || isArchiveLoading) return;
+    if (!canManage || !isDocumentsComplete || archived?.archived || isArchiveLoading) return;
     setIsArchiveLoading(true);
     try {
       // Đồng bộ lại status trong backend trước khi yêu cầu chuyển hồ sơ.
@@ -724,7 +750,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleSaveDetails = async () => {
-    if (!isAdmin || isSavingDetails) return;
+    if (!canManage || isSavingDetails) return;
     const data: Record<string, string> = {};
     Object.entries(detailForm).forEach(([field, nextValue]) => {
       const normalizedField = field.trim().toLowerCase();
@@ -749,7 +775,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleSaveReturn = async () => {
-    if (!isAdmin || !returnForm || isSavingReturn) return;
+    if (!canManage || !returnForm || isSavingReturn) return;
     setIsSavingReturn(true);
     try {
       await editReturnItem({
@@ -776,6 +802,31 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       alert(error instanceof Error ? error.message : "Không thể cập nhật thông tin hạ rỗng");
     } finally {
       setIsSavingReturn(false);
+    }
+  };
+
+  const handleCancelOrder = async () => {
+    if (!canManage || isCancelling) return;
+
+    const confirmed = window.confirm(
+      `Xác nhận chuyển đơn ${shipment.orderCode} sang trạng thái Hủy? Dữ liệu và file chứng từ vẫn được giữ nguyên.`,
+    );
+    if (!confirmed) return;
+
+    setIsCancelling(true);
+    try {
+      await editSummary({
+        action: "editSummary",
+        orderCode: shipment.orderCode,
+        data: { "Trạng thái": "Hủy" },
+      });
+      await onRefresh?.();
+      alert(`Đã chuyển đơn ${shipment.orderCode} sang trạng thái Hủy`);
+      onClose();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Không thể cập nhật trạng thái đơn hàng");
+    } finally {
+      setIsCancelling(false);
     }
   };
 
@@ -829,7 +880,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       {/* Tab Content */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 custom-scrollbar sm:px-6 sm:py-5">
 
-        {(isOcrAnalyzing || ocrUploadFile || ocrUploadError) && (
+        {isCancelled && (
+          <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-300">
+            Đơn hàng đã hủy. Toàn bộ dữ liệu chỉ được xem và không thể chỉnh sửa trên hệ thống.
+          </div>
+        )}
+
+        {!isCancelled && (isOcrAnalyzing || ocrUploadFile || ocrUploadError) && (
           <div className="mb-5">
             <p className="text-sm font-semibold text-brand-700 dark:text-brand-300">
               {isOcrAnalyzing ? "Đang phân tích chứng từ bằng OCR..." : `Kiểm tra dữ liệu ${ocrUploadDocId} trước khi lưu`}
@@ -861,14 +918,26 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         {activeTab === "overview" && (
           <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] min-w-0 flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)] sm:gap-6 sm:pr-1">
             {/* Key info grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">Thông tin đơn hàng</p>
+                <div className="flex flex-col gap-2">
+                  <InfoRow label="Tên hàng" value={shipment.shipName || "Chưa có"} />
+                  <InfoRow label="Mã INV" value={overviewInfo.invoice || "Chưa có"} mono />
+                  <InfoRow label="Số kiện hàng" value={overviewInfo.packageCount || "Chưa có"} />
+                  <InfoRow label="Net weight" value={overviewInfo.netWeight || "Chưa có"} />
+                  <InfoRow label="Gross weight" value={overviewInfo.grossWeight || "Chưa có"} />
+                  <InfoRow label="Tiền hàng" value={overviewInfo.goodsValue || "Chưa có"} />
+                </div>
+              </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Thông tin vận chuyển</p>
                 <div className="flex flex-col gap-2">
-                  <InfoRow label="Hãng tàu" value={shipment.vessel} />
-                  <InfoRow label="Bill of Lading" value={shipment.bill} mono />
-                  <InfoRow label="Cảng đến" value={shipment.port} />
-                  <InfoRow label="Số cont" value={shipment.contCount?.toString()} />
+                  <InfoRow label="Mã Container" value={overviewInfo.container || "Chưa có"} mono />
+                  <InfoRow label="Hãng tàu" value={shipment.vessel || "Chưa có"} />
+                  <InfoRow label="Bill of Lading" value={shipment.bill || "Chưa có"} mono />
+                  <InfoRow label="Cảng đến" value={shipment.port || "Chưa có"} />
+                  <InfoRow label="Lệnh thả hàng" value={overviewInfo.releaseOrder || shipment.telex || "Chưa có"} />
                 </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
@@ -880,33 +949,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   {shipment.ata && shipment.eta && (
                     <InfoRow label="So với ETA" value={formatAtaDelta(shipment.eta, shipment.ata) || undefined} />
                   )}
-                  <InfoRow label="Lệnh thả hàng" value={shipment.telex} />
                 </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Trạng thái đơn hàng</p>
-              <ShipmentStatusBar
-                activeStage={shipment.flowStageKey || "buying"}
-                stages={FLOW_STAGES}
-                isLate={shipment.flowStageLate}
-                hasOutOfOrderDocs={hasStageWarning}
-                activeStageMessage={activeStageMessage}
-              />
-              <div className="mt-4 rounded-xl bg-white px-4 py-3 text-sm font-semibold text-gray-800 dark:bg-gray-900 dark:text-white">
-                {flowLabel}
-              </div>
-            </div>
-
-            {/* Supplier / Factory info */}
-            <div className="flex items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
-              <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-500 text-white font-semibold text-sm">
-                {(shipment.supplier || "?").split(" ").map((n: string) => n[0]).slice(0, 2).join("").toUpperCase()}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-gray-800 dark:text-white">{shipment.supplier || "Chưa có"}</p>
-                {shipment.factory && <p className="text-xs text-gray-400">{shipment.factory}{shipment.origin ? ` • ${shipment.origin}` : ""}</p>}
               </div>
             </div>
 
@@ -1076,7 +1119,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         {/* ── DOCUMENTS ── */}
         {activeTab === "documents" && (
           <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
-            {isAdmin && isDocumentsComplete && !archived?.archived && (
+            {canManage && isDocumentsComplete && !archived?.archived && (
               <button type="button" onClick={handleArchive} disabled={isArchiveLoading} className="flex w-full items-center justify-center rounded-xl bg-success-500 px-4 py-3 text-sm font-semibold text-white hover:bg-success-600 disabled:cursor-not-allowed disabled:opacity-60">
                 {isArchiveLoading ? "Đang lưu trữ..." : "Lưu trữ hồ sơ"}
               </button>
@@ -1111,7 +1154,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           key={doc.id}
                           type="button"
                           onClick={() => handlePickUpload(doc.id)}
-                          disabled={!isAdmin || Boolean(archived?.archived) || isOcrAnalyzing || isOcrSaving}
+                          disabled={!canManage || Boolean(archived?.archived) || isOcrAnalyzing || isOcrSaving}
                           aria-label={`Bổ sung ${doc.name}`}
                           className={`rounded-md border px-2 py-1 text-[11px] font-semibold transition-colors ${
                             localUploads[doc.id]
@@ -1220,8 +1263,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           </svg>
                         </button>
                       )}
-                      {!archived?.archived && (
-                        <button type="button" disabled={!isAdmin || isOcrAnalyzing || isOcrSaving} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                      {!archived?.archived && canManage && (
+                        <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
                           {isOcrAnalyzing && ocrUploadDocId === doc.id ? "Đang phân tích..." : doc.status === "ok" ? "Upload file khác" : localUploads[doc.id] ? "Upload lại" : "Bổ sung file"}
                         </button>
                       )}
@@ -1244,7 +1287,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <p className="text-sm font-semibold text-gray-800 dark:text-white">Thông tin hạ rỗng</p>
                 <p className="mt-1 text-xs text-gray-400">Dữ liệu từ bảng hạ rỗng của hệ thống</p>
               </div>
-              {isAdmin && (
+              {canManage && (
                 <button type="button" onClick={() => setIsReturnEditing((current) => !current)} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
                   {isReturnEditing ? "Đóng sửa" : "Sửa"}
                 </button>
@@ -1288,14 +1331,19 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <p className="text-sm font-semibold text-gray-800 dark:text-white">Chi tiết đơn hàng</p>
                 <p className="mt-1 text-xs text-gray-400">Toàn bộ trường dữ liệu từ sheet Summary</p>
               </div>
-              {isAdmin && (
-                <button type="button" onClick={() => setIsDetailsEditing((current) => !current)} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
-                  {isDetailsEditing ? "Đóng sửa" : "Sửa"}
-                </button>
+              {canManage && (
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button type="button" onClick={() => setIsDetailsEditing((current) => !current)} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
+                    {isDetailsEditing ? "Đóng sửa" : "Sửa"}
+                  </button>
+                  <button type="button" onClick={handleCancelOrder} disabled={isCancelling} title="Chuyển trạng thái đơn sang Hủy" className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-xs font-semibold text-error-600 hover:bg-error-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
+                    {isCancelling ? "Đang cập nhật..." : "Xóa đơn"}
+                  </button>
+                </div>
               )}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              {(Object.keys(detailForm).length > 0 ? Object.keys(detailForm) : [...SUMMARY_FIELDS]).map((field) => (
+              {detailFields.map((field) => (
                 <label key={field} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
                   {field}
                   <input
