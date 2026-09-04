@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
-import type { ShipmentFlowStage } from "./ShipmentStatusBar";
+import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
 import { analyzeDocument, checkDocumentsAndSaveStatus, editReturnItem, editSummary, fetchReturnItem, getArchivedDocuments, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
@@ -610,6 +610,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const isDocumentsComplete = shipment.docStatus === 1 || (
     shipment.totalDocs > 0 && shipment.receivedDocs >= shipment.totalDocs && missingDocs.length === 0
   );
+  const activeStageDocs = shipment.flowStageKey && shipment.flowStageKey !== "delivered"
+    ? STAGE_DOC_GROUPS[shipment.flowStageKey]
+    : [];
+  const activeMissingDocCodes = missingDocs
+    .map((document) => document.id)
+    .filter((code) => activeStageDocs.includes(code));
+  const activeStageMessage = activeMissingDocCodes.length > 0
+    ? `Thiếu ${activeMissingDocCodes.join(", ")}`
+    : "Đang xử lý";
   const selectedMissingIds = selectedMissingDocIds;
   const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
   // Tất cả hãng dùng chuỗi trước dấu phẩy trong cột BL NO.
@@ -1025,6 +1034,18 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 </div>
               </div>
             </div>
+
+            {!isCancelled && (
+              <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                <ShipmentStatusBar
+                  activeStage={shipment.flowStageKey || "buying"}
+                  stages={FLOW_STAGES}
+                  isLate={shipment.flowStageLate}
+                  hasOutOfOrderDocs={hasStageWarning}
+                  activeStageMessage={activeStageMessage}
+                />
+              </div>
+            )}
 
             {/* Docs summary */}
             <div>
