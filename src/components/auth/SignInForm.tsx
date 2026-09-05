@@ -110,14 +110,17 @@ export default function SignInForm() {
                 </span>
               </div>
             </div>
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} autoComplete="off">
               <div className="space-y-6">
                 <div>
                   <Label>
                     Username <span className="text-error-500">*</span>{" "}
                   </Label>
                   <Input
-                    placeholder="tin"
+                    id="xnk-login-username"
+                    name="xnk-login-username"
+                    autoComplete="off"
+                    placeholder="Nhập tên đăng nhập"
                     type="text"
                     value={username}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) => setUsername(e.target.value)}
@@ -129,6 +132,9 @@ export default function SignInForm() {
                   </Label>
                   <div className="relative">
                     <Input
+                      id="xnk-login-password"
+                      name="xnk-login-password"
+                      autoComplete="new-password"
                       type={showPassword ? "text" : "password"}
                       placeholder="Enter your password"
                       value={password}

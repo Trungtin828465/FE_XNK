@@ -5,10 +5,43 @@ import type { ShipmentFilter, ShipmentFilterStatus } from "@/types/shipment";
 interface ShipmentFiltersProps {
   filter: ShipmentFilter;
   onChange: (filter: ShipmentFilter) => void;
-  suppliers?: string[];
-  ports?: string[];
-  vessels?: string[];
 }
+
+const SUPPLIER_OPTIONS = [
+  "Seara",
+  "Tonnies",
+  "Patel",
+  "Vetracom",
+  "Frival",
+  "Reixach",
+  "Fribin",
+  "Elpozo",
+  "Raiha",
+  "Agrobelogie",
+  "CCV",
+  "NWT",
+  "Profood",
+  "Corral",
+];
+
+const PORT_OPTIONS = ["HCM", "HP"];
+
+const VESSEL_OPTIONS = [
+  "YML",
+  "COSCO",
+  "CMA",
+  "HAPP",
+  "MAERSK",
+  "FESCO",
+  "EVER",
+  "PIL",
+  "ONE",
+  "MSC",
+  "OOCL",
+  "HMM",
+  "SINOKOR",
+  "CKLINE",
+];
 
 const STATUS_OPTIONS: { value: ShipmentFilterStatus | "all"; label: string }[] = [
   { value: "all", label: "Tất cả trạng thái" },
@@ -35,9 +68,6 @@ function CalendarIcon() {
 export default function ShipmentFilters({
   filter,
   onChange,
-  suppliers = [],
-  ports = [],
-  vessels = [],
 }: ShipmentFiltersProps) {
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     onChange({ ...filter, search: e.target.value });
@@ -131,7 +161,7 @@ export default function ShipmentFilters({
           <label className={labelCls}>Nhà cung cấp</label>
           <select id="filter-supplier" value={filter.supplier || ""} onChange={handleSupplier} className={inputCls}>
             <option value="">Tất cả</option>
-            {suppliers.map(s => (
+            {SUPPLIER_OPTIONS.map(s => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
@@ -142,7 +172,7 @@ export default function ShipmentFilters({
           <label className={labelCls}>Cảng</label>
           <select id="filter-port" value={filter.port || ""} onChange={handlePort} className={inputCls}>
             <option value="">Tất cả</option>
-            {ports.map(p => (
+            {PORT_OPTIONS.map(p => (
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
@@ -153,7 +183,7 @@ export default function ShipmentFilters({
           <label className={labelCls}>Hãng tàu</label>
           <select id="filter-vessel" value={filter.vessel || ""} onChange={handleVessel} className={inputCls}>
             <option value="">Tất cả</option>
-            {vessels.map(v => (
+            {VESSEL_OPTIONS.map(v => (
               <option key={v} value={v}>{v}</option>
             ))}
           </select>

@@ -6,7 +6,8 @@ export type ShipmentActionPermissionKey =
   | "archiveDocuments"
   | "editReturnItem"
   | "editShipmentDetails"
-  | "cancelShipment";
+  | "cancelShipment"
+  | "viewActivityLogs";
 
 interface ActionPermission {
   /** Điền đúng chuỗi role do API đăng nhập trả về, ví dụ: Admin. */
@@ -33,6 +34,7 @@ export const SHIPMENT_ACTION_PERMISSIONS: Record<ShipmentActionPermissionKey, Ac
     { role: "xnk", session: "edit" },],
   cancelShipment: [{ role: "admin", session: "all" },
     { role: "xnk", session: "edit" },],
+  viewActivityLogs: [{ role: "admin", session: "all" }],
 };
 
 function normalizeRole(value?: string): string {

@@ -3,14 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import React from "react";
+import { canPerformShipmentAction } from "../config/shipmentActionPermissions";
+import { useAuth } from "../context/AuthContext";
 import { useSidebar } from "../context/SidebarContext";
 import { GridIcon, HorizontaLDots } from "../icons/index";
 
 const AppSidebar: React.FC = () => {
+  const { user } = useAuth();
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
   const showText = isExpanded || isHovered || isMobileOpen;
-  const isActive = pathname === "/";
+  const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
 
   return (
     <aside
@@ -52,12 +55,12 @@ const AppSidebar: React.FC = () => {
             <Link
               href="/"
               className={`menu-item group ${
-                isActive ? "menu-item-active" : "menu-item-inactive"
+                pathname === "/" ? "menu-item-active" : "menu-item-inactive"
               } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
             >
               <span
                 className={
-                  isActive
+                  pathname === "/"
                     ? "menu-item-icon-active"
                     : "menu-item-icon-inactive"
                 }
@@ -67,6 +70,26 @@ const AppSidebar: React.FC = () => {
               {showText && <span className="menu-item-text">Xuất nhập khẩu</span>}
             </Link>
           </li>
+          {canViewLogs && (
+            <li>
+              <Link
+                href="/activity-logs"
+                className={`menu-item group ${
+                  pathname === "/activity-logs" ? "menu-item-active" : "menu-item-inactive"
+                } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
+              >
+                <span className={pathname === "/activity-logs" ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="8" y1="13" x2="16" y2="13" />
+                    <line x1="8" y1="17" x2="16" y2="17" />
+                  </svg>
+                </span>
+                {showText && <span className="menu-item-text">Nhật ký hoạt động</span>}
+              </Link>
+            </li>
+          )}
         </ul>
       </nav>
     </aside>

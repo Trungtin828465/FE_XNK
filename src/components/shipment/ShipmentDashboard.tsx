@@ -11,104 +11,20 @@ import CreateShipmentModal from "./CreateShipmentModal";
 import { useAuth } from "@/context/AuthContext";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 
-type FilterAliasType = "supplier" | "vessel" | "port";
-
-const DEFAULT_FILTER_OPTIONS: Record<FilterAliasType, string[]> = {
-  supplier: ["REIXACH", "Tönnies", "Patel"],
-  vessel: ["MSC", "ONE", "YML", "Hapag-Lloyd"],
-  port: ["Cát Lái", "Hải Phòng"],
-};
-
-const FILTER_ALIASES: Record<FilterAliasType, Record<string, string>> = {
-  supplier: {
-    reixach: "reixach",
-    rexach: "reixach",
-    rexacha: "reixach",
-    escorxadorfrigorificrexachsl: "reixach",
-    escorxadorfrigorificreixachsl: "reixach",
-    escorxadorfrigorificrexach: "reixach",
-    escorxadorfrigorificreixach: "reixach",
-    tonnies: "tonnies",
-    patel: "patel",
-  },
-  vessel: {
-    msc: "msc",
-    mscline: "msc",
-    mscvietnam: "msc",
-    mediterraneanshippingcompany: "msc",
-    one: "one",
-    oneline: "one",
-    oceannetworkexpress: "one",
-    oceannetworkexpressvietnam: "one",
-    yml: "yml",
-    yangming: "yml",
-    yangmingline: "yml",
-    yangmingmarine: "yml",
-    maerskline: "maersk",
-    apmollermaersk: "maersk",
-    cmacgm: "cmacgm",
-    happ: "hapaglloyd",
-    hapag: "hapaglloyd",
-    hpl: "hapaglloyd",
-    hapaglloyd: "hapaglloyd",
-    hapaglloydline: "hapaglloyd",
-    evergreenline: "evergreen",
-    evergreenmarine: "evergreen",
-    coscoshipping: "cosco",
-    hyundaimerchantmarine: "hmm",
-    zimintegratedshippingservices: "zim",
-    orientoverseascontainerline: "oocl",
-    pacificinternationallines: "pil",
-    wanhailines: "wanhai",
-    sinokorshipping: "sinokor",
-    sitcshipping: "sitc",
-    koreamarinetransport: "kmtc",
-    regionalcontainerlines: "rcl",
-  },
-  port: {
-    catlai: "catlai",
-    cangcatlai: "catlai",
-    hp: "haiphong",
-    haiphong: "haiphong",
-    canghaiphong: "haiphong",
-    haiphongport: "haiphong",
-  },
-};
-
-function normalizeFilterAlias(value?: string): string {
+function normalizeFilterValue(value?: string): string {
   return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "D")
+    .replace(/đ/gi, "d")
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
 }
 
-function getFilterAliasKey(type: FilterAliasType, value?: string): string {
-  let normalized = normalizeFilterAlias(value);
-  if (type === "supplier") {
-    const suffixes = ["jointstockcompany", "companylimited", "corporation", "company", "limited", "coltd", "jsc", "ltd", "corp", "inc", "llc", "gmbh", "sarl", "sas", "plc", "sl", "bv", "nv"];
-    let previous = "";
-    while (normalized && normalized !== previous) {
-      previous = normalized;
-      const suffix = suffixes.find((item) => normalized.endsWith(item));
-      if (suffix) normalized = normalized.slice(0, -suffix.length);
-    }
-  }
-  return FILTER_ALIASES[type][normalized] || normalized;
-}
-
-function buildFilterOptions(type: FilterAliasType, values: Array<string | undefined>): string[] {
-  const labels = new Map<string, string>();
-  [...DEFAULT_FILTER_OPTIONS[type], ...values].forEach((value) => {
-    if (!value?.trim()) return;
-    const key = getFilterAliasKey(type, value);
-    if (!key || labels.has(key)) return;
-    const defaultLabel = DEFAULT_FILTER_OPTIONS[type].find((item) => getFilterAliasKey(type, item) === key);
-    labels.set(key, defaultLabel || value.trim());
-  });
-  return [...labels.values()].sort((a, b) => a.localeCompare(b, "vi"));
+function containsFilterValue(source?: string, selected?: string): boolean {
+  if (!selected) return true;
+  const sourceValue = normalizeFilterValue(source);
+  const selectedValue = normalizeFilterValue(selected);
+  return Boolean(sourceValue && selectedValue && sourceValue.includes(selectedValue));
 }
 
 export default function ShipmentDashboard() {
@@ -187,14 +103,6 @@ export default function ShipmentDashboard() {
     }
   };
 
-  // Dynamic dropdown options (unique values from data)
-  const filterOptions = useMemo(() => {
-    const suppliers = buildFilterOptions("supplier", shipments.map((shipment) => shipment.supplier));
-    const ports = buildFilterOptions("port", shipments.map((shipment) => shipment.port));
-    const vessels = buildFilterOptions("vessel", shipments.map((shipment) => shipment.vessel));
-    return { suppliers, ports, vessels };
-  }, [shipments]);
-
   // Apply filters
   const filteredShipments = useMemo(() => {
     return shipments.filter(s => {
@@ -212,13 +120,13 @@ export default function ShipmentDashboard() {
         .some(v => v?.toLowerCase().includes(q));
 
       // Supplier
-      const supplierOk = !filter.supplier || getFilterAliasKey("supplier", s.supplier) === getFilterAliasKey("supplier", filter.supplier);
+      const supplierOk = containsFilterValue(s.supplier, filter.supplier);
 
       // Port
-      const portOk = !filter.port || getFilterAliasKey("port", s.port) === getFilterAliasKey("port", filter.port);
+      const portOk = containsFilterValue(s.port, filter.port);
 
       // Vessel
-      const vesselOk = !filter.vessel || getFilterAliasKey("vessel", s.vessel) === getFilterAliasKey("vessel", filter.vessel);
+      const vesselOk = containsFilterValue(s.vessel, filter.vessel);
 
       // Date range
       let dateOk = true;
@@ -313,9 +221,6 @@ export default function ShipmentDashboard() {
       <ShipmentFilters
         filter={filter}
         onChange={handleFilterChange}
-        suppliers={filterOptions.suppliers}
-        ports={filterOptions.ports}
-        vessels={filterOptions.vessels}
       />
 
       {/* Table */}

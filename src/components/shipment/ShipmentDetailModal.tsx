@@ -315,10 +315,83 @@ function formatDate(iso?: string): string {
 function toDateInputValue(value?: string): string {
   const raw = String(value || "").trim();
   if (!raw) return "";
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
   const match = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-  if (match) return `${match[3]}-${match[2].padStart(2, "0")}-${match[1].padStart(2, "0")}`;
+  if (match) {
+    const first = Number(match[1]);
+    const second = Number(match[2]);
+    // Sheet có thể trả DD/MM/YYYY hoặc MM/DD/YYYY. Giá trị > 12 giúp xác định chắc chắn thứ tự.
+    const month = second > 12 && first <= 12 ? first : second;
+    const day = second > 12 && first <= 12 ? second : first;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${match[3]}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+  }
   return "";
+}
+
+function isDateDetailField(field: string): boolean {
+  const normalized = field
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  return normalized.startsWith("ngay") || normalized === "etd" || normalized === "eta";
+}
+
+function CalendarIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="17" rx="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  );
+}
+
+function DateFieldInput({
+  value,
+  disabled,
+  label,
+  onChange,
+}: {
+  value?: string;
+  disabled: boolean;
+  label: string;
+  onChange: (value: string) => void;
+}) {
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  const openPicker = () => {
+    if (disabled || !inputRef.current) return;
+    if (typeof inputRef.current.showPicker === "function") inputRef.current.showPicker();
+    else inputRef.current.focus();
+  };
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        type="date"
+        value={toDateInputValue(value)}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        className="input-date-icon w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 pr-10 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+      />
+      <button
+        type="button"
+        aria-label={`Chọn ${label}`}
+        disabled={disabled}
+        onClick={openPicker}
+        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-brand-500 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-gray-700"
+      >
+        <CalendarIcon />
+      </button>
+    </div>
+  );
 }
 
 function formatDateTime(iso?: string): string {
@@ -1392,16 +1465,25 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
                 {RETURN_FIELDS.map(({ key, label }) => (
-                  <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                    {label}
-                    <input
-                      type={key === "ngay" ? "date" : "text"}
-                      value={key === "ngay" ? toDateInputValue(returnForm?.[key]) : returnForm?.[key] || ""}
-                      disabled={!isReturnEditing || key === "soHd"}
-                      onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)}
-                      className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                    />
-                  </label>
+                  <div key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                    <span>{label}</span>
+                    {key === "ngay" ? (
+                      <DateFieldInput
+                        label={label}
+                        value={returnForm?.[key]}
+                        disabled={!isReturnEditing}
+                        onChange={(value) => setReturnForm((current) => current ? { ...current, [key]: value } : current)}
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={returnForm?.[key] || ""}
+                        disabled={!isReturnEditing || key === "soHd"}
+                        onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)}
+                        className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                      />
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -1442,16 +1524,25 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {detailFields.map((field) => (
-                <label key={field} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                  {field}
-                  <input
-                    type="text"
-                    value={detailForm[field] || ""}
-                    disabled={!isDetailsEditing || field.trim().toLowerCase() === "stt" || field.trim().toLowerCase() === "số hđ" || field.trim().toLowerCase() === "order_code" || field.trim().toLowerCase() === "order code"}
-                    onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))}
-                    className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                  />
-                </label>
+                <div key={field} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
+                  <span>{field}</span>
+                  {isDateDetailField(field) ? (
+                    <DateFieldInput
+                      label={field}
+                      value={detailForm[field]}
+                      disabled={!isDetailsEditing}
+                      onChange={(value) => setDetailForm((current) => ({ ...current, [field]: value }))}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={detailForm[field] || ""}
+                      disabled={!isDetailsEditing || field.trim().toLowerCase() === "stt" || field.trim().toLowerCase() === "số hđ" || field.trim().toLowerCase() === "order_code" || field.trim().toLowerCase() === "order code"}
+                      onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))}
+                      className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                    />
+                  )}
+                </div>
               ))}
             </div>
             {canEditDetails && isDetailsEditing && (
