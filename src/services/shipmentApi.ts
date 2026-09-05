@@ -27,7 +27,7 @@ const FLOW_DOCUMENT_GROUPS: Array<{ key: Shipment["flowStageKey"]; docs: string[
 export const SUMMARY_FIELDS = [
   "Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng",
   "INV", "Ngày INV", "Số hộp", "Trọng lượng", "Trọng lượng cả bì", "BL NO.",
-  "Số Container", "Hãng tàu", "Cảng đến", "ETD", "ETA",
+  "Số Container", "Hãng tàu", "Cảng đến", "ETD", "ETA", "ATA",
 ] as const;
 
 function endpoint(path: string): string {
@@ -119,6 +119,7 @@ function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, ind
   const isCancelled = ["hủy", "huy", "đã hủy", "da huy", "cancelled", "canceled"].includes(statusValue);
   const completed = !isCancelled && completeByDocuments;
   const eta = parseDate(getSheetValue(row, "ETA"));
+  const ata = parseDate(getSheetValue(row, "ATA"));
   const flowStageKey = completed
     ? "delivered"
     : FLOW_DOCUMENT_GROUPS.find((group) => group.docs.some((code) => !documents.some((document) => document.id === code && document.status === "ok")))?.key || "customs";
@@ -141,6 +142,7 @@ function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, ind
     bill: getSheetValue(row, "BL NO.") || undefined,
     etd: parseDate(getSheetValue(row, "ETD")),
     eta,
+    ata,
     port: getSheetValue(row, "Cảng đến") || undefined,
     contCount: undefined,
     status: isCancelled ? "cancelled" : completed ? "completed" : receivedDocs === 0 ? "missing_docs" : "shipping",

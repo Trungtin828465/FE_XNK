@@ -331,6 +331,17 @@ function toDateInputValue(value?: string): string {
   return "";
 }
 
+function formatEtaRemaining(eta: string | undefined, currentDay: number): string | null {
+  const normalizedEta = toDateInputValue(eta);
+  if (!normalizedEta) return null;
+  const [year, month, day] = normalizedEta.split("-").map(Number);
+  const etaDay = Date.UTC(year, month - 1, day);
+  const remainingDays = Math.round((etaDay - currentDay) / (24 * 60 * 60 * 1000));
+  if (remainingDays < 0) return null;
+  if (remainingDays === 0) return "Hôm nay";
+  return `${remainingDays} ngày`;
+}
+
 function isDateDetailField(field: string): boolean {
   const normalized = field
     .normalize("NFD")
@@ -560,6 +571,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [detailForm, setDetailForm] = useState<Record<string, string>>({});
   const [isSavingDetails, setIsSavingDetails] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [currentDay] = useState(() => {
+    const now = new Date();
+    return Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  });
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
   const [isPreviewMaximized, setIsPreviewMaximized] = useState(false);
@@ -644,6 +659,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     goodsValue: getSummaryValue(summaryFields, ["Tiền hàng", "Giá tổng", "Trị giá", "Tổng tiền"]),
     releaseOrder: getSummaryValue(summaryFields, ["Lệnh thả hàng", "Lệnh giao hàng", "Telex", "Telex release"]),
   };
+  const etaRemaining = shipment.ata ? null : formatEtaRemaining(shipment.eta, currentDay);
   // Tạm ẩn cột STT trong tab Chi tiết; dữ liệu gốc trong Sheet vẫn được giữ nguyên.
   const detailFields = (Object.keys(detailForm).length > 0 ? Object.keys(detailForm) : [...SUMMARY_FIELDS])
     .filter((field) => field.trim().toLowerCase() !== "stt");
@@ -1100,6 +1116,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <div className="flex flex-col gap-2">
                   <InfoRow label="ETD (Dự kiến xuất)" value={formatDate(shipment.etd)} />
                   <InfoRow label="ETA (Dự kiến đến)" value={formatDate(shipment.eta)} />
+                  {etaRemaining && <InfoRow label="Thời gian còn lại" value={etaRemaining} />}
                   <InfoRow label="ATA (Thực tế đến)" value={shipment.ata ? formatDate(shipment.ata) : "Chưa đến"} />
                   {shipment.ata && shipment.eta && (
                     <InfoRow label="So với ETA" value={formatAtaDelta(shipment.eta, shipment.ata) || undefined} />
