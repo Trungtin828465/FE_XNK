@@ -638,8 +638,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       .finally(() => setIsReturnLoading(false));
     void getArchivedDocuments(shipment.orderCode)
       .then((result) => setArchived(result.archived ? result : { success: true, archived: false }))
-      // Không mở quyền chỉnh sửa khi chưa xác định được trạng thái lưu trữ.
-      .catch(() => setArchived(null));
+      // Đơn chưa có thư mục lưu trữ có thể được backend trả về dưới dạng lỗi/not found.
+      // Đánh dấu là chưa lưu trữ để quyền admin/xnk vẫn hoạt động bình thường.
+      .catch(() => setArchived({ success: true, archived: false }));
   }, [isOpen, shipment]);
 
   if (!shipment) return null;
