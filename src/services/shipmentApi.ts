@@ -10,6 +10,7 @@ import type {
 } from "@/types/shipment";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
+export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
 const DOCUMENT_CODES = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
   "PHI_TK", "THUE_NK", "TK", "15B", "QDTQ", "MV", "TRA_CONG",
@@ -249,6 +250,14 @@ export function getSheetNoti(): Promise<SheetNotification[]> {
   return requestJson<SheetNotification[]>("getSheetNoti");
 }
 
+export function markAllNotificationsRead(): Promise<DriveDataResponse> {
+  return requestJson<DriveDataResponse>("markAllNotificationsRead", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "markAllNotificationsRead" }),
+  });
+}
+
 export function getArchivedDocuments(orderCode: string): Promise<ArchivedDocumentsResponse> {
   return requestJson<ArchivedDocumentsResponse>(`getArchivedDocuments?orderCode=${encodeURIComponent(orderCode)}`);
 }
@@ -270,8 +279,19 @@ export function updateNotificationStatus(): Promise<DriveDataResponse> {
 }
 
 export interface UploadDocumentPayload { action: "uploadDocument"; orderCode: string; documentCode: string; fileName: string; fileData: string; }
-export function uploadDocument(payload: UploadDocumentPayload): Promise<DriveDataResponse> {
-  return requestJson<DriveDataResponse>("uploadDocument", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+export async function uploadDocument(payload: UploadDocumentPayload): Promise<DriveDataResponse> {
+  const result = await requestJson<DriveDataResponse>("uploadDocument", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, mimeType: "application/pdf" }),
+  });
+
+  // Upload đã thành công: đẩy dữ liệu sync sang notification dropdown ngay trong cùng phiên trình duyệt.
+  // Nếu backend không trả sync.notifications, dropdown sẽ tự fallback về GET /getSheetNoti.
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(NOTIFICATIONS_SYNC_EVENT, { detail: result.sync }));
+  }
+  return result;
 }
 
 export interface EditSummaryPayload { action: "editSummary"; orderCode: string; data: Record<string, string | number>; }

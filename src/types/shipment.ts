@@ -135,6 +135,11 @@ export interface DriveDataResponse {
   success: boolean;
   message?: string;
   updatedAt?: string;
+  sync?: {
+    sheetTotal?: unknown;
+    notifications?: unknown;
+    errors?: unknown[];
+  };
 }
 
 export interface SheetDataResponse {
