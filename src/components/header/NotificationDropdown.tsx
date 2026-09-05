@@ -231,7 +231,7 @@ export default function NotificationDropdown() {
         <span className="mb-1 block text-sm font-medium text-gray-800 dark:text-white/90">{item.title}</span>
         <span className={`block text-xs text-gray-500 dark:text-gray-400 ${compact ? "line-clamp-2" : ""}`}>{item.body}</span>
         {item.updatedBy && !compact && (
-          <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-400">Người thực hiện: {item.updatedBy}</span>
+          <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-400">Giai đoạn: {item.updatedBy}</span>
         )}
         <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
           <span className="font-medium text-gray-600 dark:text-gray-300">{item.orderCode || "—"}</span>
