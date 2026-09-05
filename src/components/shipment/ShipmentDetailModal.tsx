@@ -638,17 +638,20 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       .finally(() => setIsReturnLoading(false));
     void getArchivedDocuments(shipment.orderCode)
       .then((result) => setArchived(result.archived ? result : { success: true, archived: false }))
-      .catch(() => setArchived({ success: true, archived: false }));
+      // Không mở quyền chỉnh sửa khi chưa xác định được trạng thái lưu trữ.
+      .catch(() => setArchived(null));
   }, [isOpen, shipment]);
 
   if (!shipment) return null;
 
   const isCancelled = shipment.status === "cancelled";
-  const canUploadDocuments = !isCancelled && canPerformShipmentAction(user, "uploadDocument");
-  const canArchiveDocuments = !isCancelled && canPerformShipmentAction(user, "archiveDocuments");
-  const canEditReturnItem = !isCancelled && canPerformShipmentAction(user, "editReturnItem");
-  const canEditDetails = !isCancelled && canPerformShipmentAction(user, "editShipmentDetails");
-  const canCancelShipment = !isCancelled && canPerformShipmentAction(user, "cancelShipment");
+  const isArchived = archived?.archived === true;
+  const archiveStatusResolved = archived !== null;
+  const canUploadDocuments = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "uploadDocument");
+  const canArchiveDocuments = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "archiveDocuments");
+  const canEditReturnItem = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "editReturnItem");
+  const canEditDetails = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "editShipmentDetails");
+  const canCancelShipment = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "cancelShipment");
   const summaryFields = shipment.summaryFields;
   const overviewInfo = {
     invoice: getSummaryValue(summaryFields, ["INV", "Mã INV", "Số INV"]),
@@ -1488,14 +1491,14 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       <DateFieldInput
                         label={label}
                         value={returnForm?.[key]}
-                        disabled={!isReturnEditing}
+                        disabled={!canEditReturnItem || !isReturnEditing}
                         onChange={(value) => setReturnForm((current) => current ? { ...current, [key]: value } : current)}
                       />
                     ) : (
                       <input
                         type="text"
                         value={returnForm?.[key] || ""}
-                        disabled={!isReturnEditing || key === "soHd"}
+                        disabled={!canEditReturnItem || !isReturnEditing || key === "soHd"}
                         onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)}
                         className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                       />
@@ -1510,7 +1513,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <button type="button" onClick={handleSaveReturn} disabled={isSavingReturn} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingReturn ? "Đang lưu..." : "Lưu thay đổi"}</button>
               </div>
             )}
-            {!isReturnLoading && !returnItem && !isReturnEditing && (
+            {!isReturnLoading && !returnItem && (!isReturnEditing || !canEditReturnItem) && (
               <p className="py-4 text-center text-sm text-gray-400">Chưa có dữ liệu hạ rỗng cho đơn này</p>
             )}
           </div>
@@ -1547,14 +1550,14 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     <DateFieldInput
                       label={field}
                       value={detailForm[field]}
-                      disabled={!isDetailsEditing}
+                      disabled={!canEditDetails || !isDetailsEditing}
                       onChange={(value) => setDetailForm((current) => ({ ...current, [field]: value }))}
                     />
                   ) : (
                     <input
                       type="text"
                       value={detailForm[field] || ""}
-                      disabled={!isDetailsEditing || field.trim().toLowerCase() === "stt" || field.trim().toLowerCase() === "số hđ" || field.trim().toLowerCase() === "order_code" || field.trim().toLowerCase() === "order code"}
+                      disabled={!canEditDetails || !isDetailsEditing || field.trim().toLowerCase() === "stt" || field.trim().toLowerCase() === "số hđ" || field.trim().toLowerCase() === "order_code" || field.trim().toLowerCase() === "order code"}
                       onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))}
                       className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                     />
