@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import { useLanguage } from "@/context/LanguageContext";
 
 export type ShipmentFlowStageKey =
   | "buying"
@@ -35,6 +36,7 @@ const STAGE_ICON: Record<ShipmentFlowStageKey, React.ReactNode> = {
 };
 
 export default function ShipmentStatusBar({ activeStage, stages, isLate, hasOutOfOrderDocs, activeStageMessage }: ShipmentStatusBarProps) {
+  const { t } = useLanguage();
   const activeIndex = Math.max(0, stages.findIndex((s) => s.key === activeStage));
 
   const getTone = (index: number) => {
@@ -90,13 +92,13 @@ export default function ShipmentStatusBar({ activeStage, stages, isLate, hasOutO
                   </p>
                   <p className={`mt-0.5 text-[9px] leading-tight ${subCls[tone]}`}>
                     {completed
-                      ? (stage.key === "delivered" ? "Thành công" : "Đã xong")
+                      ? (stage.key === "delivered" ? t("successful") : t("done"))
                       : index === activeIndex
-                      ? activeStageMessage || "Đang xử lý"
-                      : "Chưa tới"}
+                      ? activeStageMessage || t("processing")
+                      : t("notReached")}
                   </p>
                   <p className="hidden">
-                    {completed ? (stage.key === "delivered" ? "Thành công" : "Đã xong") : index === activeIndex ? "Bổ sung INV PKL" : "Chưa tới"}
+                    {completed ? (stage.key === "delivered" ? t("successful") : t("done")) : index === activeIndex ? activeStageMessage || t("processing") : t("notReached")}
                   </p>
                 </div>
               </div>

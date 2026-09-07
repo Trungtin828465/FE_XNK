@@ -88,16 +88,16 @@ const TAB_LIST: { key: ModalTab; labelKey: string; icon: React.ReactNode }[] = [
   },
 ];
 
-const RETURN_FIELDS: { key: keyof ReturnItem; label: string }[] = [
-  { key: "ngay", label: "Ngày" },
-  { key: "soCont", label: "Số cont" },
-  { key: "soHd", label: "Số HĐ" },
-  { key: "nhaXe", label: "Nhà xe" },
-  { key: "xeTai", label: "Xe / tài xế" },
-  { key: "noiLayHang", label: "Nơi lấy hàng" },
-  { key: "noiTraHang", label: "Nơi trả hàng" },
-  { key: "noiHaRong", label: "Nơi hạ rỗng" },
-  { key: "nhapXuat", label: "Nhập / Xuất" },
+const RETURN_FIELDS: { key: keyof ReturnItem; labelKey: string }[] = [
+  { key: "ngay", labelKey: "day" },
+  { key: "soCont", labelKey: "containerNumberShort" },
+  { key: "soHd", labelKey: "orderNumber" },
+  { key: "nhaXe", labelKey: "carrierCompany" },
+  { key: "xeTai", labelKey: "vehicleDriver" },
+  { key: "noiLayHang", labelKey: "pickupLocation" },
+  { key: "noiTraHang", labelKey: "deliveryLocation" },
+  { key: "noiHaRong", labelKey: "emptyReturnLocation" },
+  { key: "nhapXuat", labelKey: "importExportType" },
 ];
 
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string; dot: string }> = {
@@ -332,15 +332,15 @@ function toDateInputValue(value?: string): string {
   return "";
 }
 
-function formatEtaRemaining(eta: string | undefined, currentDay: number): string | null {
+function formatEtaRemaining(eta: string | undefined, currentDay: number, language: "vi" | "en"): string | null {
   const normalizedEta = toDateInputValue(eta);
   if (!normalizedEta) return null;
   const [year, month, day] = normalizedEta.split("-").map(Number);
   const etaDay = Date.UTC(year, month - 1, day);
   const remainingDays = Math.round((etaDay - currentDay) / (24 * 60 * 60 * 1000));
   if (remainingDays < 0) return null;
-  if (remainingDays === 0) return "Hôm nay";
-  return `${remainingDays} ngày`;
+  if (remainingDays === 0) return language === "en" ? "Today" : "Hôm nay";
+  return language === "en" ? `${remainingDays} days` : `${remainingDays} ngày`;
 }
 
 function isDateDetailField(field: string): boolean {
@@ -411,14 +411,14 @@ function formatDateTime(iso?: string): string {
   return new Date(iso).toLocaleString("vi-VN", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function formatAtaDelta(eta?: string, ata?: string): string | null {
+function formatAtaDelta(eta: string | undefined, ata: string | undefined, language: "vi" | "en"): string | null {
   if (!eta || !ata) return null;
   const etaDate = new Date(`${eta}T00:00:00`);
   const ataDate = new Date(`${ata}T00:00:00`);
   const diffDays = Math.round((ataDate.getTime() - etaDate.getTime()) / (1000 * 60 * 60 * 24));
-  if (diffDays === 0) return "Giao đúng hạn";
-  if (diffDays < 0) return `Giao sớm ${Math.abs(diffDays)} ngày`;
-  return `Giao muộn ${diffDays} ngày`;
+  if (diffDays === 0) return language === "en" ? "Arrived on time" : "Giao đúng hạn";
+  if (diffDays < 0) return language === "en" ? `${Math.abs(diffDays)} days early` : `Giao sớm ${Math.abs(diffDays)} ngày`;
+  return language === "en" ? `${diffDays} days late` : `Giao muộn ${diffDays} ngày`;
 }
 
 function readFileAsBase64(file: File): Promise<string> {
@@ -449,6 +449,18 @@ function normalizeSheetField(value: string): string {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
+}
+
+function localizeSheetField(field: string, translate: (key: string) => string): string {
+  const fieldKeys: Record<string, string> = {
+    sohd: "orderNumber", ngayhdpi: "piDate", nhacungcap: "supplier", xuatxu: "origin",
+    tenhang: "productName", giatong: "goodsValue", inv: "invoiceNumber", ngayinv: "invoiceDate",
+    sohop: "boxCount", soluong: "boxCount", trongluong: "netWeight", trongluongcabi: "grossWeight",
+    blno: "billNumber", socontainer: "containerNumber", hangtau: "carrier", cangden: "destinationPort",
+    etd: "estimatedDeparture", eta: "estimatedArrival", ata: "actualArrival", trangthai: "status",
+  };
+  const key = fieldKeys[normalizeSheetField(field)];
+  return key ? translate(key) : field;
 }
 
 function ensureRequiredOcrFields(data: Record<string, string>, documentType: OcrDocumentType): Record<string, string> {
@@ -596,7 +608,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const { user } = useAuth();
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const [activeTab, setActiveTab] = useState<ModalTab>("overview");
   const [archived, setArchived] = useState<ArchivedDocumentsResponse | null>(null);
   const [isArchiveLoading, setIsArchiveLoading] = useState(false);
@@ -701,12 +713,19 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     goodsValue: getSummaryValue(summaryFields, ["Tiền hàng", "Giá tổng", "Trị giá", "Tổng tiền"]),
     releaseOrder: getSummaryValue(summaryFields, ["Lệnh thả hàng", "Lệnh giao hàng", "Telex", "Telex release"]),
   };
-  const etaRemaining = shipment.ata ? null : formatEtaRemaining(shipment.eta, currentDay);
+  const etaRemaining = shipment.ata ? null : formatEtaRemaining(shipment.eta, currentDay, language);
   // Tạm ẩn cột STT trong tab Chi tiết; dữ liệu gốc trong Sheet vẫn được giữ nguyên.
   const detailFields = (Object.keys(detailForm).length > 0 ? Object.keys(detailForm) : [...SUMMARY_FIELDS])
     .filter((field) => field.trim().toLowerCase() !== "stt");
   const statusInfo = STATUS_MAP[shipment.status];
-  const flowLabel = isCancelled ? statusInfo?.label : shipment.flowStageLabel || statusInfo?.label;
+  const statusLabelKeys: Record<string, string> = { cancelled: "cancelledStatus", shipping: "shipping", completed: "completed", missing_docs: "missingDocumentsStatus" };
+  const flowLabel = language === "en"
+    ? t(statusLabelKeys[shipment.status] || "status")
+    : isCancelled ? statusInfo?.label : shipment.flowStageLabel || statusInfo?.label;
+  const localizedFlowStages = FLOW_STAGES.map((stage) => ({
+    ...stage,
+    label: t({ buying: "stageBuying", shipping: "stageShipping", arrived: "stageArrived", declared: "stageDeclared", fifteenb: "stageFifteenB", customs: "stageCustoms", delivered: "stageDelivered" }[stage.key]),
+  }));
   const hasStageWarning = hasOutOfOrderDocuments(shipment);
   // const flowColor = shipment.flowStageKey === "delivered"
   //   ? "text-success-600 bg-success-50 dark:bg-success-500/10"
@@ -748,8 +767,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     .map((document) => document.id)
     .filter((code) => activeStageDocs.includes(code));
   const activeStageMessage = activeMissingDocCodes.length > 0
-    ? `Thiếu ${activeMissingDocCodes.join(", ")}`
-    : "Đang xử lý";
+    ? `${t("missing")}: ${activeMissingDocCodes.join(", ")}`
+    : t("processing");
   const selectedMissingIds = selectedMissingDocIds;
   const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
   // Tất cả hãng dùng chuỗi trước dấu phẩy trong cột BL NO.
@@ -877,7 +896,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const documentType = getOcrDocumentType(ocrUploadDocId);
     const missingFields = getMissingOcrFields(ocrUploadFields, documentType);
     if (missingFields.length > 0) {
-      setOcrUploadError(`Vui lòng bổ sung đầy đủ: ${missingFields.join(", ")}.`);
+      setOcrUploadError(t("requiredMissing", { fields: missingFields.map((field) => localizeSheetField(field, t)).join(", ") }));
       return;
     }
     setIsOcrSaving(true);
@@ -959,7 +978,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     const etd = toDateInputValue(etdEntry?.[1]);
     const eta = toDateInputValue(etaEntry?.[1]);
     if (etd && eta && eta < etd) {
-      notify("ETA không được nhỏ hơn ETD. Vui lòng kiểm tra lại ngày dự kiến.", "error");
+      notify(t("etaBeforeEtd"), "error");
       return;
     }
     const data: Record<string, string> = {};
@@ -1030,10 +1049,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     if (!canCancelShipment || isCancelling) return;
 
     const confirmed = await confirm({
-      title: "Xác nhận hủy đơn hàng",
-      message: `Bạn có chắc muốn chuyển đơn ${shipment.orderCode} sang trạng thái Hủy? Dữ liệu và file chứng từ vẫn được giữ nguyên.`,
-      confirmText: "Hủy đơn",
-      cancelText: "Quay lại",
+      title: t("cancelShipmentTitle"),
+      message: t("cancelShipmentMessage", { orderCode: shipment.orderCode }),
+      confirmText: t("cancelShipmentAction"),
+      cancelText: t("goBack"),
       tone: "danger",
     });
     if (!confirmed) return;
@@ -1077,11 +1096,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           </div>
           {shipment.soldAtSea && (
             <span className="text-xs font-semibold text-success-600 dark:text-success-400">
-              Đã bán trên biển
+              {t("soldAtSea")}
             </span>
           )}
           <p className="break-words text-sm text-gray-500 dark:text-gray-400">{shipment.shipName}</p>
-          <p className="break-words text-xs text-gray-400">Nhà cung cấp: <span className="font-medium text-gray-600 dark:text-gray-300">{shipment.supplier}</span></p>
+          <p className="break-words text-xs text-gray-400">{t("supplierPrefix", { supplier: shipment.supplier })}</p>
         </div>
 
         {/* Missing docs badge */}
@@ -1112,23 +1131,23 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
         {isCancelled && (
           <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-300">
-            Đơn hàng đã hủy. Toàn bộ dữ liệu chỉ được xem và không thể chỉnh sửa trên hệ thống.
+            {t("cancelledReadOnly")}
           </div>
         )}
 
         {canUploadDocuments && (isOcrAnalyzing || ocrUploadFile || ocrUploadError) && (
           <div className="mb-5">
             <p className="text-sm font-semibold text-brand-700 dark:text-brand-300">
-              {isOcrAnalyzing ? "Đang phân tích chứng từ bằng OCR..." : `Kiểm tra dữ liệu ${ocrUploadDocId} trước khi lưu`}
+              {isOcrAnalyzing ? t("analyzingDocument") : t("reviewBeforeSave", { document: ocrUploadDocId || "" })}
             </p>
             {ocrUploadFile && !isOcrAnalyzing && (
               <>
-                <p className="mt-1 text-xs text-gray-500">File: {ocrUploadFile.name} • Mã đơn: {shipment.orderCode}</p>
+                <p className="mt-1 text-xs text-gray-500">{t("fileAndOrder", { file: ocrUploadFile.name, orderCode: shipment.orderCode })}</p>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     {Object.entries(ocrUploadFields || {}).filter(([key]) => !key.startsWith("_")).map(([key, value]) => (
                       <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
                         <span>
-                          {key}
+                          {localizeSheetField(key, t)}
                           {currentOcrDocumentType && OCR_REQUIRED_FIELDS[currentOcrDocumentType].some((field) => normalizeSheetField(field) === normalizeSheetField(key)) && (
                             <span className="text-error-500"> *</span>
                           )}
@@ -1139,14 +1158,14 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 </div>
                 {missingOcrFields.length > 0 && (
                   <p className="mt-3 text-xs text-error-600 dark:text-error-400">
-                    Còn thiếu thông tin bắt buộc: {missingOcrFields.join(", ")}.
+                    {t("requiredMissing", { fields: missingOcrFields.map((field) => localizeSheetField(field, t)).join(", ") })}
                   </p>
                 )}
                 {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
                 <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadFields({}); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
-                  <button type="button" onClick={() => { if (ocrUploadDocId && ocrFilePreviewUrl) { setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: ocrFilePreviewUrl })); setPreviewUrl(ocrFilePreviewUrl); setPreviewName(ocrUploadFile.name); } setActiveTab("documents"); }} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20">Xem file chứng từ</button>
-                  <button type="button" onClick={handleConfirmOcrUpload} disabled={!canUploadDocuments || isOcrSaving || missingOcrFields.length > 0} title={missingOcrFields.length > 0 ? `Còn thiếu: ${missingOcrFields.join(", ")}` : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? "Đang lưu..." : "Xác nhận và lưu"}</button>
+                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadFields({}); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
+                  <button type="button" onClick={() => { if (ocrUploadDocId && ocrFilePreviewUrl) { setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: ocrFilePreviewUrl })); setPreviewUrl(ocrFilePreviewUrl); setPreviewName(ocrUploadFile.name); } setActiveTab("documents"); }} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20">{t("viewDocument")}</button>
+                  <button type="button" onClick={handleConfirmOcrUpload} disabled={!canUploadDocuments || isOcrSaving || missingOcrFields.length > 0} title={missingOcrFields.length > 0 ? t("requiredMissing", { fields: missingOcrFields.map((field) => localizeSheetField(field, t)).join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? t("saving") : t("confirmSave")}</button>
                 </div>
               </>
             )}
@@ -1160,35 +1179,35 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             {/* Key info grid */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">Thông tin đơn hàng</p>
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-gray-400">{t("shipmentInformation")}</p>
                 <div className="flex flex-col gap-2">
-                  <InfoRow label="Tên hàng" value={shipment.shipName || "Chưa có"} />
-                  <InfoRow label="Mã INV" value={overviewInfo.invoice || "Chưa có"} mono />
-                  <InfoRow label="Số kiện hàng" value={overviewInfo.packageCount || "Chưa có"} />
+                  <InfoRow label={t("productName")} value={shipment.shipName || t("notAvailable")} />
+                  <InfoRow label={t("invoiceNumber")} value={overviewInfo.invoice || t("notAvailable")} mono />
+                  <InfoRow label={t("packageCount")} value={overviewInfo.packageCount || t("notAvailable")} />
                   <InfoRow label="Net weight" value={overviewInfo.netWeight || "Chưa có"} />
                   <InfoRow label="Gross weight" value={overviewInfo.grossWeight || "Chưa có"} />
-                  <InfoRow label="Tiền hàng" value={overviewInfo.goodsValue || "Chưa có"} />
+                  <InfoRow label={t("goodsValue")} value={overviewInfo.goodsValue || t("notAvailable")} />
                 </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Thông tin vận chuyển</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{t("shippingInformation")}</p>
                 <div className="flex flex-col gap-2">
-                  <InfoRow label="Mã Container" value={overviewInfo.container || "Chưa có"} mono />
-                  <InfoRow label="Hãng tàu" value={shipment.vessel || "Chưa có"} />
-                  <InfoRow label="Bill of Lading" value={shipment.bill || "Chưa có"} mono />
-                  <InfoRow label="Cảng đến" value={shipment.port || "Chưa có"} />
-                  <InfoRow label="Lệnh thả hàng" value={overviewInfo.releaseOrder || shipment.telex || "Chưa có"} />
+                  <InfoRow label={t("containerNumber")} value={overviewInfo.container || t("notAvailable")} mono />
+                  <InfoRow label={t("carrier")} value={shipment.vessel || t("notAvailable")} />
+                  <InfoRow label="Bill of Lading" value={shipment.bill || t("notAvailable")} mono />
+                  <InfoRow label={t("destinationPort")} value={shipment.port || t("notAvailable")} />
+                  <InfoRow label={t("releaseOrder")} value={overviewInfo.releaseOrder || shipment.telex || t("notAvailable")} />
                 </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Thời gian</p>
+                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{t("timeline")}</p>
                 <div className="flex flex-col gap-2">
-                  <InfoRow label="ETD (Dự kiến xuất)" value={formatDate(shipment.etd)} />
-                  <InfoRow label="ETA (Dự kiến đến)" value={formatDate(shipment.eta)} />
-                  {etaRemaining && <InfoRow label="Thời gian còn lại" value={etaRemaining} />}
-                  <InfoRow label="ATA (Thực tế đến)" value={shipment.ata ? formatDate(shipment.ata) : "Chưa đến"} />
+                  <InfoRow label={t("estimatedDeparture")} value={formatDate(shipment.etd)} />
+                  <InfoRow label={t("estimatedArrival")} value={formatDate(shipment.eta)} />
+                  {etaRemaining && <InfoRow label={t("remainingTime")} value={etaRemaining} />}
+                  <InfoRow label={t("actualArrival")} value={shipment.ata ? formatDate(shipment.ata) : t("notArrived")} />
                   {shipment.ata && shipment.eta && (
-                    <InfoRow label="So với ETA" value={formatAtaDelta(shipment.eta, shipment.ata) || undefined} />
+                    <InfoRow label={t("comparedWithEta")} value={formatAtaDelta(shipment.eta, shipment.ata, language) || undefined} />
                   )}
                 </div>
               </div>
@@ -1198,7 +1217,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
                 <ShipmentStatusBar
                   activeStage={shipment.flowStageKey || "buying"}
-                  stages={FLOW_STAGES}
+                  stages={localizedFlowStages}
                   isLate={shipment.flowStageLate}
                   hasOutOfOrderDocs={hasStageWarning}
                   activeStageMessage={activeStageMessage}
@@ -1208,7 +1227,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
             {/* Docs summary */}
             <div>
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Giấy tờ / Chứng từ</p>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">{t("documentSummary")}</p>
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-2.5 rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
                   <div
@@ -1232,17 +1251,17 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                    Tra cứu lịch trình
+                    {t("scheduleLookup")}
                   </p>
                   <p className="mt-2 text-sm font-medium text-gray-800 dark:text-white/90">
-                    {shipment.vessel || "Chưa xác định hãng tàu"}
+                    {shipment.vessel || t("unknownCarrier")}
                   </p>
                     <p className="mt-1 break-words text-xs text-gray-500 dark:text-gray-400">
-                    Mở trang tra cứu chính thức của hãng để xem vị trí và lịch trình container.
+                    {t("trackingHelp")}
                   </p>
                   {trackingCode && (
                     <p className="mt-1 text-xs font-mono text-gray-400 dark:text-gray-500">
-                      Mã tra cứu: {trackingCode}
+                      {t("trackingCode", { code: trackingCode })}
                     </p>
                   )}
                 </div>
@@ -1257,7 +1276,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <>
                   {carrierTrackingLink.requiresManualCode && (
                     <p className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
-                      Hãy copy mã tra cứu ở trên trước khi ấn vào link.
+                      {t("copyTrackingCode")}
                     </p>
                   )}
                   {carrierTrackingLink.usesBackendApi ? (
@@ -1269,8 +1288,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     >
                       <span className="min-w-0 break-words text-left leading-5">
                         {isOpeningTracking
-                          ? `Đang mở tracking ${carrierTrackingLink.name}...`
-                          : `Tra cứu lịch trình ${carrierTrackingLink.name}`}
+                          ? `${t("updating")} ${carrierTrackingLink.name}...`
+                          : `${t("scheduleLookup")} ${carrierTrackingLink.name}`}
                       </span>
                       {isOpeningTracking ? (
                         <svg className="flex-shrink-0 animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1293,7 +1312,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       rel="noopener noreferrer"
                       className={`${carrierTrackingLink.requiresManualCode ? "mt-2" : "mt-4"} flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-500 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 dark:border-brand-500/30 sm:px-4`}
                     >
-                      <span className="min-w-0 break-words text-left leading-5">Tra cứu lịch trình {carrierTrackingLink.name}</span>
+                      <span className="min-w-0 break-words text-left leading-5">{t("scheduleLookup")} {carrierTrackingLink.name}</span>
                       <svg className="flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
                         <polyline points="15 3 21 3 21 9" />
@@ -1317,10 +1336,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               ) : (
                 <div className="mt-4 rounded-xl border border-dashed border-warning-200 bg-warning-50/70 px-4 py-3 dark:border-warning-500/30 dark:bg-warning-500/10">
                   <p className="text-sm font-semibold text-warning-700 dark:text-warning-300">
-                    {carrierTrackingLink ? "Chưa có mã tra cứu để mở lịch trình" : "Hãng tàu chưa cung cấp lịch trình"}
+                    {carrierTrackingLink ? t("trackingUnavailable") : t("carrierTrackingUnavailable")}
                   </p>
                   <p className="mt-1 text-xs text-warning-600 dark:text-warning-400">
-                    {carrierTrackingLink ? "Vui lòng bổ sung mã BL/container trong dữ liệu shipment." : "Hiện chưa có link tra cứu cho hãng tàu này."}
+                    {carrierTrackingLink ? t("addTrackingCode") : t("noCarrierLink")}
                   </p>
                 </div>
               )}
@@ -1351,7 +1370,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           stage.isCompleted ? "text-success-700 dark:text-success-400" : stage.isCurrent ? "text-brand-700 dark:text-brand-300" : "text-gray-500"
                         }`}>{stage.label}</p>
                         {stage.isCurrent && (
-                          <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-500 dark:bg-brand-500/10">Đang ở đây</span>
+                          <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-500 dark:bg-brand-500/10">{t("currentStage")}</span>
                         )}
                       </div>
                       {stage.portName && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">📍 {stage.portName}</p>}
@@ -1374,7 +1393,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
             {canArchiveDocuments && isDocumentsComplete && !archived?.archived && (
               <button type="button" onClick={handleArchive} disabled={isArchiveLoading} className="flex w-full items-center justify-center rounded-xl bg-success-500 px-4 py-3 text-sm font-semibold text-white hover:bg-success-600 disabled:cursor-not-allowed disabled:opacity-60">
-                {isArchiveLoading ? "Đang lưu trữ..." : "Lưu trữ hồ sơ"}
+                {isArchiveLoading ? t("archiving") : t("archiveDocuments")}
               </button>
             )}
             {archived?.archived && archived.folderUrl && (
@@ -1382,7 +1401,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M3 7a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
                 </svg>
-                Mở thư mục chứng từ
+                {t("openDocumentFolder")}
               </a>
             )}
             {/* Missing docs alert removed: upload is available on each document row. */}
@@ -1494,14 +1513,14 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-gray-800 dark:text-white/90 truncate">{doc.name}</p>
+                      <p className="text-sm font-medium text-gray-800 dark:text-white/90 truncate">{language === "en" ? t("documentName", { code: doc.id }) : doc.name}</p>
                       <p className="text-xs text-gray-400">{doc.type.toUpperCase()}</p>
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <span className={`flex items-center gap-1 text-xs font-semibold ${docStatus?.color}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${docStatus?.dot}`} />
-                        {docStatus?.label}
+                        {t({ ok: "available", missing: "missing", pending: "pending", expired: "expired" }[doc.status] || "status")}
                       </span>
                       {(doc.url || localUploads[doc.id]) && (
                         <button
@@ -1518,7 +1537,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       )}
                       {!archived?.archived && canUploadDocuments && (
                         <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
-                          {isOcrAnalyzing && ocrUploadDocId === doc.id ? "Đang phân tích..." : doc.status === "ok" ? "Upload file khác" : localUploads[doc.id] ? "Upload lại" : "Bổ sung file"}
+                          {isOcrAnalyzing && ocrUploadDocId === doc.id ? t("analyzingDocument") : doc.status === "ok" ? t("uploadAnother") : localUploads[doc.id] ? t("uploadAnother") : t("uploadDocument")}
                         </button>
                       )}
                     </div>
@@ -1526,7 +1545,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 );
               })}
               {(!shipment.documents || shipment.documents.length === 0) && (
-                <p className="py-8 text-center text-sm text-gray-400">Chưa có chứng từ nào</p>
+                <p className="py-8 text-center text-sm text-gray-400">{t("noDocuments")}</p>
               )}
             </div>
           </div>
@@ -1537,20 +1556,22 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-gray-800 dark:text-white">Thông tin hạ rỗng</p>
-                <p className="mt-1 text-xs text-gray-400">Dữ liệu từ bảng hạ rỗng của hệ thống</p>
+                <p className="text-sm font-semibold text-gray-800 dark:text-white">{t("emptyReturnInformation")}</p>
+                <p className="mt-1 text-xs text-gray-400">{t("emptyReturnSource")}</p>
               </div>
               {canEditReturnItem && (
                 <button type="button" onClick={() => setIsReturnEditing((current) => !current)} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
-                  {isReturnEditing ? "Đóng sửa" : "Sửa"}
+                  {isReturnEditing ? t("closeEdit") : t("edit")}
                 </button>
               )}
             </div>
             {isReturnLoading ? (
-              <p className="py-8 text-center text-sm text-gray-400">Đang tải dữ liệu hạ rỗng...</p>
+              <p className="py-8 text-center text-sm text-gray-400">{t("loadingEmptyReturn")}</p>
             ) : (
               <div className="grid gap-3 sm:grid-cols-2">
-                {RETURN_FIELDS.map(({ key, label }) => (
+                {RETURN_FIELDS.map(({ key, labelKey }) => {
+                  const label = t(labelKey);
+                  return (
                   <div key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
                     <span>{label}</span>
                     {key === "ngay" ? (
@@ -1570,17 +1591,18 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       />
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
             {canEditReturnItem && isReturnEditing && (
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => { setReturnForm(returnItem || { ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", xeTai: "", noiLayHang: "", noiTraHang: "", noiHaRong: "", nhapXuat: "" }); setIsReturnEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">Hủy</button>
-                <button type="button" onClick={handleSaveReturn} disabled={isSavingReturn} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingReturn ? "Đang lưu..." : "Lưu thay đổi"}</button>
+                <button type="button" onClick={() => { setReturnForm(returnItem || { ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", xeTai: "", noiLayHang: "", noiTraHang: "", noiHaRong: "", nhapXuat: "" }); setIsReturnEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
+                <button type="button" onClick={handleSaveReturn} disabled={isSavingReturn} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingReturn ? t("saving") : t("save")}</button>
               </div>
             )}
             {!isReturnLoading && !returnItem && (!isReturnEditing || !canEditReturnItem) && (
-              <p className="py-4 text-center text-sm text-gray-400">Chưa có dữ liệu hạ rỗng cho đơn này</p>
+              <p className="py-4 text-center text-sm text-gray-400">{t("noEmptyReturn")}</p>
             )}
           </div>
         )}
@@ -1590,19 +1612,19 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-gray-800 dark:text-white">Chi tiết đơn hàng</p>
-                <p className="mt-1 text-xs text-gray-400">Toàn bộ trường dữ liệu từ sheet Summary</p>
+                <p className="text-sm font-semibold text-gray-800 dark:text-white">{t("shipmentDetails")}</p>
+                <p className="mt-1 text-xs text-gray-400">{t("summarySheetFields")}</p>
               </div>
               {(canEditDetails || canCancelShipment) && (
                 <div className="flex flex-wrap justify-end gap-2">
                   {canEditDetails && (
                   <button type="button" onClick={() => setIsDetailsEditing((current) => !current)} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
-                    {isDetailsEditing ? "Đóng sửa" : "Sửa"}
+                    {isDetailsEditing ? t("closeEdit") : t("edit")}
                   </button>
                   )}
                   {canCancelShipment && (
                   <button type="button" onClick={handleCancelOrder} disabled={isCancelling} title="Chuyển trạng thái đơn sang Hủy" className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-xs font-semibold text-error-600 hover:bg-error-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
-                    {isCancelling ? "Đang cập nhật..." : "Xóa đơn"}
+                    {isCancelling ? t("updatingShipment") : t("deleteShipment")}
                   </button>
                   )}
                 </div>
@@ -1611,7 +1633,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             <div className="grid gap-3 sm:grid-cols-2">
               {detailFields.map((field) => (
                 <div key={field} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                  <span>{field}</span>
+                  <span>{localizeSheetField(field, t)}</span>
                   {isDateDetailField(field) ? (
                     <DateFieldInput
                       label={field}
@@ -1633,8 +1655,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             </div>
             {canEditDetails && isDetailsEditing && (
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => { setDetailForm(shipment.summaryFields || {}); setIsDetailsEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">Hủy</button>
-                <button type="button" onClick={handleSaveDetails} disabled={isSavingDetails} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingDetails ? "Đang lưu..." : "Lưu thay đổi"}</button>
+                <button type="button" onClick={() => { setDetailForm(shipment.summaryFields || {}); setIsDetailsEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
+                <button type="button" onClick={handleSaveDetails} disabled={isSavingDetails} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingDetails ? t("saving") : t("save")}</button>
               </div>
             )}
           </div>
@@ -1651,8 +1673,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   </svg>
                 </div>
                 <div className="min-w-0">
-                  <p className="break-words text-sm font-bold text-gray-800 dark:text-white">Hồ sơ lưu trữ</p>
-                  <p className="mt-0.5 break-words text-xs text-gray-400">Các chứng từ đã lưu trữ của {shipment.orderCode}</p>
+                  <p className="break-words text-sm font-bold text-gray-800 dark:text-white">{t("archivedRecords")}</p>
+                  <p className="mt-0.5 break-words text-xs text-gray-400">{t("archivedDocumentsOf", { orderCode: shipment.orderCode })}</p>
                 </div>
               </div>
 
@@ -1668,11 +1690,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     <polyline points="15 3 21 3 21 9"/>
                     <line x1="10" y1="14" x2="21" y2="3"/>
                   </svg>
-                  Mở hồ sơ lưu trữ
+                  {t("openArchivedRecords")}
                 </a>
               ) : (
                 <div className="rounded-xl border border-dashed border-gray-200 p-5 text-center dark:border-gray-700 sm:p-6">
-                  <p className="text-sm text-gray-400">Chưa có thư mục Drive được liên kết</p>
+                  <p className="text-sm text-gray-400">{t("noDriveFolder")}</p>
                 </div>
               )}
 
@@ -1688,7 +1710,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
               {shipment.timeUpdate && (
                 <p className="mt-3 break-words text-center text-xs text-gray-400">
-                  Cập nhật lần cuối: {new Date(shipment.timeUpdate).toLocaleString("vi-VN")}
+                  {t("lastUpdated", { time: new Date(shipment.timeUpdate).toLocaleString(language === "en" ? "en-US" : "vi-VN") })}
                 </p>
               )}
             </div>
@@ -1719,10 +1741,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         <aside className={`fixed right-0 top-0 z-[100000] flex h-screen flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isPreviewMaximized ? "w-full" : "w-[min(92vw,620px)]"}`}>
           <div className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">
             <p className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-white">{previewName}</p>
-            <button type="button" onClick={() => setIsPreviewMaximized((current) => !current)} className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={isPreviewMaximized ? "Thu nhỏ" : "Phóng to"}>
-              {isPreviewMaximized ? "Thu nhỏ" : "Phóng to"}
+            <button type="button" onClick={() => setIsPreviewMaximized((current) => !current)} className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={isPreviewMaximized ? t("minimize") : t("maximize")}>
+              {isPreviewMaximized ? t("minimize") : t("maximize")}
             </button>
-            <button type="button" onClick={() => setIsPreviewCollapsed(true)} className="rounded-lg px-2 text-xl leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Đẩy panel sang phải">→</button>
+            <button type="button" onClick={() => setIsPreviewCollapsed(true)} className="rounded-lg px-2 text-xl leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white" aria-label={t("collapsePreview")}>→</button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
             <iframe title={previewName} src={previewUrl} className="h-full min-h-[calc(100vh-5rem)] w-full rounded-lg bg-white" />
@@ -1730,7 +1752,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         </aside>
       )}
       {previewUrl && isPreviewCollapsed && (
-        <button type="button" onClick={() => setIsPreviewCollapsed(false)} className="fixed right-0 top-1/2 z-[100000] rounded-l-xl border border-r-0 border-brand-200 bg-brand-500 px-3 py-4 text-sm font-semibold text-white shadow-lg hover:bg-brand-600" aria-label="Mở panel xem file">
+        <button type="button" onClick={() => setIsPreviewCollapsed(false)} className="fixed right-0 top-1/2 z-[100000] rounded-l-xl border border-r-0 border-brand-200 bg-brand-500 px-3 py-4 text-sm font-semibold text-white shadow-lg hover:bg-brand-600" aria-label={t("openPreview")}>
           ← File
         </button>
       )}
