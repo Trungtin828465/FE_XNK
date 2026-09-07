@@ -432,7 +432,43 @@ function readFileAsBase64(file: File): Promise<string> {
   });
 }
 
-function getOcrDocumentType(documentCode: string): "PI" | "INV" | "PKL" | "BL" | null {
+type OcrDocumentType = "PI" | "INV" | "PKL" | "BL";
+
+const OCR_REQUIRED_FIELDS: Record<OcrDocumentType, string[]> = {
+  PI: ["Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng"],
+  INV: ["INV", "Ngày INV"],
+  PKL: ["Số hộp", "Trọng lượng", "Trọng lượng cả bì"],
+  BL: ["BL NO.", "Số Container", "Hãng tàu", "ETD", "Cảng đến"],
+};
+
+function normalizeSheetField(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function ensureRequiredOcrFields(data: Record<string, string>, documentType: OcrDocumentType): Record<string, string> {
+  const fields = { ...data };
+  const existingKeys = new Set(Object.keys(fields).map(normalizeSheetField));
+  OCR_REQUIRED_FIELDS[documentType].forEach((field) => {
+    if (!existingKeys.has(normalizeSheetField(field))) fields[field] = "";
+  });
+  return fields;
+}
+
+function getMissingOcrFields(fields: Record<string, string>, documentType: OcrDocumentType | null): string[] {
+  if (!documentType) return [];
+  return OCR_REQUIRED_FIELDS[documentType].filter((requiredField) => {
+    const wanted = normalizeSheetField(requiredField);
+    const match = Object.entries(fields).find(([field]) => normalizeSheetField(field) === wanted);
+    return !match || !String(match[1] ?? "").trim();
+  });
+}
+
+function getOcrDocumentType(documentCode: string): OcrDocumentType | null {
   const code = documentCode.toUpperCase();
   return code === "PI" || code === "INV" || code === "PKL" ? code : code === "BL" ? "BL" : null;
 }
@@ -719,6 +755,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const carrierTrackingUrl = carrierTrackingLink && trackingCode
     ? carrierTrackingLink.buildUrl(trackingCode)
     : null;
+  const currentOcrDocumentType = ocrUploadDocId ? getOcrDocumentType(ocrUploadDocId) : null;
+  const missingOcrFields = getMissingOcrFields(ocrUploadFields, currentOcrDocumentType);
 
   const handleOpenCarrierTracking = async () => {
     if (!carrierTrackingLink?.usesBackendApi || !carrierTrackingUrl) return;
@@ -818,7 +856,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       const fileData = await readFileAsBase64(file);
       setOcrUploadFileData(fileData);
       const result = await analyzeDocument({ documentType, file });
-      setOcrUploadFields(result.data && typeof result.data === "object" ? result.data : {});
+      const analyzedFields = result.data && typeof result.data === "object" ? result.data : {};
+      setOcrUploadFields(ensureRequiredOcrFields(analyzedFields, documentType));
     } catch (error) {
       setOcrUploadError(error instanceof Error ? error.message : "Không thể upload hoặc phân tích chứng từ");
       setOcrUploadFile(null);
@@ -833,6 +872,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   const handleConfirmOcrUpload = async () => {
     if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !canUploadDocuments || isOcrSaving) return;
+    const documentType = getOcrDocumentType(ocrUploadDocId);
+    const missingFields = getMissingOcrFields(ocrUploadFields, documentType);
+    if (missingFields.length > 0) {
+      setOcrUploadError(`Vui lòng bổ sung đầy đủ: ${missingFields.join(", ")}.`);
+      return;
+    }
     setIsOcrSaving(true);
     setOcrUploadError("");
     try {
@@ -907,6 +952,14 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   const handleSaveDetails = async () => {
     if (!canEditDetails || isSavingDetails) return;
+    const etdEntry = Object.entries(detailForm).find(([field]) => normalizeSheetField(field) === "etd");
+    const etaEntry = Object.entries(detailForm).find(([field]) => normalizeSheetField(field) === "eta");
+    const etd = toDateInputValue(etdEntry?.[1]);
+    const eta = toDateInputValue(etaEntry?.[1]);
+    if (etd && eta && eta < etd) {
+      notify("ETA không được nhỏ hơn ETD. Vui lòng kiểm tra lại ngày dự kiến.", "error");
+      return;
+    }
     const data: Record<string, string> = {};
     Object.entries(detailForm).forEach(([field, nextValue]) => {
       const normalizedField = field.trim().toLowerCase();
@@ -1072,16 +1125,26 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     {Object.entries(ocrUploadFields || {}).filter(([key]) => !key.startsWith("_")).map(([key, value]) => (
                       <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                        {key}
+                        <span>
+                          {key}
+                          {currentOcrDocumentType && OCR_REQUIRED_FIELDS[currentOcrDocumentType].some((field) => normalizeSheetField(field) === normalizeSheetField(key)) && (
+                            <span className="text-error-500"> *</span>
+                          )}
+                        </span>
                         <input type="text" value={value} onChange={(event) => setOcrUploadFields((current) => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                       </label>
                     ))}
                 </div>
+                {missingOcrFields.length > 0 && (
+                  <p className="mt-3 text-xs text-error-600 dark:text-error-400">
+                    Còn thiếu thông tin bắt buộc: {missingOcrFields.join(", ")}.
+                  </p>
+                )}
                 {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
                 <div className="mt-4 flex flex-wrap justify-end gap-2">
                   <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadFields({}); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
                   <button type="button" onClick={() => { if (ocrUploadDocId && ocrFilePreviewUrl) { setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: ocrFilePreviewUrl })); setPreviewUrl(ocrFilePreviewUrl); setPreviewName(ocrUploadFile.name); } setActiveTab("documents"); }} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20">Xem file chứng từ</button>
-                  <button type="button" onClick={handleConfirmOcrUpload} disabled={!canUploadDocuments || isOcrSaving || !Object.values(ocrUploadFields || {}).some(Boolean)} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? "Đang lưu..." : "Xác nhận và lưu"}</button>
+                  <button type="button" onClick={handleConfirmOcrUpload} disabled={!canUploadDocuments || isOcrSaving || missingOcrFields.length > 0} title={missingOcrFields.length > 0 ? `Còn thiếu: ${missingOcrFields.join(", ")}` : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? "Đang lưu..." : "Xác nhận và lưu"}</button>
                 </div>
               </>
             )}

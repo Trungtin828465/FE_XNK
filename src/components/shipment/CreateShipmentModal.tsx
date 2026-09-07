@@ -24,6 +24,15 @@ interface ReviewFields {
   totalPrice: string;
 }
 
+const REQUIRED_REVIEW_FIELDS: Array<{ key: keyof ReviewFields; label: string }> = [
+  { key: "orderCode", label: "Mã đơn hàng" },
+  { key: "orderDate", label: "Ngày PI" },
+  { key: "supplier", label: "Nhà cung cấp" },
+  { key: "origin", label: "Xuất xứ" },
+  { key: "product", label: "Tên sản phẩm" },
+  { key: "totalPrice", label: "Giá tổng" },
+];
+
 const EMPTY_FIELDS: ReviewFields = {
   orderCode: "",
   orderDate: "",
@@ -149,6 +158,10 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   const duplicateOrderCode = Boolean(normalizedOrderCode && existingOrderCodes.some(
     (code) => code.trim().toUpperCase().replace(/\s+/g, "") === normalizedOrderCode,
   ));
+  const missingRequiredFields = REQUIRED_REVIEW_FIELDS
+    .filter(({ key }) => !fields[key].trim())
+    .map(({ label }) => label);
+  const hasMissingRequiredFields = missingRequiredFields.length > 0;
 
   const handleConfirm = async () => {
     if (!canCreateShipment || !file || !fileData || isSaving) return;
@@ -156,8 +169,8 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       setError(`Mã PI ${fields.orderCode.trim()} đã tồn tại trong danh sách đơn hàng.`);
       return;
     }
-    if (!fields.orderCode.trim() || !fields.product.trim() || !fields.supplier.trim()) {
-      setError("Vui lòng bổ sung Mã đơn hàng, Tên sản phẩm và Nhà cung cấp.");
+    if (hasMissingRequiredFields) {
+      setError(`Vui lòng bổ sung đầy đủ: ${missingRequiredFields.join(", ")}.`);
       return;
     }
 
@@ -234,19 +247,24 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
               <div className="col-span-full grid content-start gap-3 sm:grid-cols-2">
                 {reviewFields.map(([key, label]) => (
                   <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                    {label}
+                    <span>{label} <span className="text-error-500">*</span></span>
                     <input type="text" value={fields[key]} onChange={(event) => updateField(key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                   </label>
                 ))}
               </div>
             </div>
+            {hasMissingRequiredFields && (
+              <p className="text-xs text-error-600 dark:text-error-400">
+                Còn thiếu thông tin bắt buộc: {missingRequiredFields.join(", ")}.
+              </p>
+            )}
           </>
         )}
       </div>
       <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 px-6 py-4 dark:border-gray-800">
         {filePreviewUrl && <button type="button" onClick={() => setIsFilePanelOpen(true)} className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Xem file PI</button>}
         <button type="button" onClick={handleClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
-        <button type="button" onClick={handleConfirm} disabled={!canCreateShipment || !file || isAnalyzing || isSaving || duplicateOrderCode} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Đang lưu..." : "Xác nhận tạo đơn"}</button>
+        <button type="button" onClick={handleConfirm} disabled={!canCreateShipment || !file || isAnalyzing || isSaving || duplicateOrderCode || hasMissingRequiredFields} title={hasMissingRequiredFields ? `Còn thiếu: ${missingRequiredFields.join(", ")}` : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Đang lưu..." : "Xác nhận tạo đơn"}</button>
       </div>
     </Modal>
       {isFilePanelOpen && filePreviewUrl && (
