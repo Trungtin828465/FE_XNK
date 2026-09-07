@@ -7,6 +7,7 @@ import { canPerformShipmentAction } from "../config/shipmentActionPermissions";
 import { useAuth } from "../context/AuthContext";
 import { useSidebar } from "../context/SidebarContext";
 import { GridIcon, HorizontaLDots } from "../icons/index";
+import { useLanguage } from "../context/LanguageContext";
 
 const AppSidebar: React.FC = () => {
   const { user } = useAuth();
@@ -14,6 +15,7 @@ const AppSidebar: React.FC = () => {
   const pathname = usePathname();
   const showText = isExpanded || isHovered || isMobileOpen;
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
+  const { t } = useLanguage();
 
   return (
     <aside
@@ -37,7 +39,7 @@ const AppSidebar: React.FC = () => {
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-500 text-sm font-bold text-white">
             XNK
           </span>
-          {showText && <span>Quản lý xuất nhập khẩu</span>}
+          {showText && <span>{t("importExportManagement")}</span>}
         </Link>
       </div>
 
@@ -47,7 +49,7 @@ const AppSidebar: React.FC = () => {
             !isExpanded && !isHovered ? "lg:justify-center" : "justify-start"
           }`}
         >
-          {showText ? "Chức năng" : <HorizontaLDots />}
+          {showText ? t("features") : <HorizontaLDots />}
         </h2>
 
         <ul className="flex flex-col gap-4">
@@ -67,7 +69,7 @@ const AppSidebar: React.FC = () => {
               >
                 <GridIcon />
               </span>
-              {showText && <span className="menu-item-text">Xuất nhập khẩu</span>}
+              {showText && <span className="menu-item-text">{t("importExport")}</span>}
             </Link>
           </li>
           {canViewLogs && (
@@ -86,7 +88,7 @@ const AppSidebar: React.FC = () => {
                     <line x1="8" y1="17" x2="16" y2="17" />
                   </svg>
                 </span>
-                {showText && <span className="menu-item-text">Nhật ký hoạt động</span>}
+                {showText && <span className="menu-item-text">{t("activityLogs")}</span>}
               </Link>
             </li>
           )}

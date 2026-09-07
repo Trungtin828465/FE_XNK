@@ -6,6 +6,7 @@ import { ThemeProvider } from '@/context/ThemeContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { SystemNotificationProvider } from '@/context/SystemNotificationContext';
 import { SystemConfirmProvider } from '@/context/SystemConfirmContext';
+import { LanguageProvider } from '@/context/LanguageContext';
 
 const outfit = Outfit({
   subsets: ["latin"],
@@ -17,17 +18,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="vi">
       <body className={`${outfit.className} dark:bg-gray-900`}>
-        <ThemeProvider>
-          <AuthProvider>
-            <SystemNotificationProvider>
-              <SystemConfirmProvider>
-                <SidebarProvider>{children}</SidebarProvider>
-              </SystemConfirmProvider>
-            </SystemNotificationProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        <LanguageProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <SystemNotificationProvider>
+                <SystemConfirmProvider>
+                  <SidebarProvider>{children}</SidebarProvider>
+                </SystemConfirmProvider>
+              </SystemNotificationProvider>
+            </AuthProvider>
+          </ThemeProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

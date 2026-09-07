@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import type { ShipmentMetricsSummary, ShipmentStatus } from "@/types/shipment";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface MetricCardProps {
   label: string;
@@ -55,10 +56,11 @@ interface ShipmentMetricsProps {
 }
 
 export default function ShipmentMetrics({ metrics, activeFilter, onFilterChange }: ShipmentMetricsProps) {
+  const { t } = useLanguage();
   const cards = [
     {
       key: "all" as const,
-      label: "Tổng đơn hàng",
+      label: t("totalShipments"),
       value: metrics.total,
       colorClass: "text-brand-500",
       bgClass: "bg-brand-50 dark:bg-brand-500/10",
@@ -74,7 +76,7 @@ export default function ShipmentMetrics({ metrics, activeFilter, onFilterChange 
     },
     {
       key: "completed" as const,
-      label: "Hoàn thành",
+      label: t("completed"),
       value: metrics.completed,
       colorClass: "text-success-600",
       bgClass: "bg-success-50 dark:bg-success-500/10",
@@ -88,7 +90,7 @@ export default function ShipmentMetrics({ metrics, activeFilter, onFilterChange 
     },
     {
       key: "shipping" as const,
-      label: "Đang vận chuyển",
+      label: t("shipping"),
       value: metrics.shipping,
       colorClass: "text-blue-light-600",
       bgClass: "bg-blue-light-50 dark:bg-blue-light-500/10",
@@ -104,7 +106,7 @@ export default function ShipmentMetrics({ metrics, activeFilter, onFilterChange 
     },
     {
       key: "cancelled" as const,
-      label: "Đơn hủy",
+      label: t("cancelled"),
       value: metrics.cancelled,
       colorClass: "text-error-600",
       bgClass: "bg-error-50 dark:bg-error-500/10",

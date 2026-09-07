@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import type { ShipmentFilter, ShipmentFilterStatus } from "@/types/shipment";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface ShipmentFiltersProps {
   filter: ShipmentFilter;
@@ -43,13 +44,6 @@ const VESSEL_OPTIONS = [
   "CKLINE",
 ];
 
-const STATUS_OPTIONS: { value: ShipmentFilterStatus | "all"; label: string }[] = [
-  { value: "all", label: "Tất cả trạng thái" },
-  { value: "shipping", label: "Đang vận chuyển" },
-  { value: "completed", label: "Hoàn thành" },
-  { value: "cancelled", label: "Đơn hủy" },
-];
-
 const inputCls =
   "w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500 dark:focus:ring-brand-500/20";
 const labelCls = "mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400";
@@ -69,6 +63,13 @@ export default function ShipmentFilters({
   filter,
   onChange,
 }: ShipmentFiltersProps) {
+  const { t } = useLanguage();
+  const statusOptions: { value: ShipmentFilterStatus | "all"; label: string }[] = [
+    { value: "all", label: t("allStatuses") },
+    { value: "shipping", label: t("shipping") },
+    { value: "completed", label: t("completed") },
+    { value: "cancelled", label: t("cancelled") },
+  ];
   const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     onChange({ ...filter, search: e.target.value });
   };
@@ -125,7 +126,7 @@ export default function ShipmentFilters({
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap">
         {/* Search: mã đơn + tên hàng */}
         <div className="flex-1 min-w-[200px]">
-          <label className={labelCls}>Tìm kiếm (Mã đơn / Tên hàng)</label>
+          <label className={labelCls}>{t("search")}</label>
           <div className="relative">
             <svg
               className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
@@ -140,7 +141,7 @@ export default function ShipmentFilters({
               id="filter-search"
               value={filter.search || ""}
               onChange={handleSearch}
-              placeholder="Nhập mã đơn hàng hoặc tên hàng..."
+              placeholder={t("searchPlaceholder")}
               className="w-full rounded-xl border border-gray-200 bg-gray-50 pl-9 pr-4 py-2 text-sm text-gray-800 placeholder-gray-400 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:placeholder-gray-500 dark:focus:border-brand-500 dark:focus:ring-brand-500/20"
             />
           </div>
@@ -148,9 +149,9 @@ export default function ShipmentFilters({
 
         {/* Trạng thái */}
         <div className="w-full md:w-48">
-          <label className={labelCls}>Trạng thái</label>
+          <label className={labelCls}>{t("status")}</label>
           <select id="filter-status" value={filter.status || "all"} onChange={handleStatus} className={inputCls}>
-            {STATUS_OPTIONS.map(opt => (
+            {statusOptions.map(opt => (
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
@@ -158,9 +159,9 @@ export default function ShipmentFilters({
 
         {/* Nhà cung cấp */}
         <div className="w-full md:w-44">
-          <label className={labelCls}>Nhà cung cấp</label>
+          <label className={labelCls}>{t("supplier")}</label>
           <select id="filter-supplier" value={filter.supplier || ""} onChange={handleSupplier} className={inputCls}>
-            <option value="">Tất cả</option>
+            <option value="">{t("all")}</option>
             {SUPPLIER_OPTIONS.map(s => (
               <option key={s} value={s}>{s}</option>
             ))}
@@ -169,9 +170,9 @@ export default function ShipmentFilters({
 
         {/* Cảng */}
         <div className="w-full md:w-36">
-          <label className={labelCls}>Cảng</label>
+          <label className={labelCls}>{t("port")}</label>
           <select id="filter-port" value={filter.port || ""} onChange={handlePort} className={inputCls}>
-            <option value="">Tất cả</option>
+            <option value="">{t("all")}</option>
             {PORT_OPTIONS.map(p => (
               <option key={p} value={p}>{p}</option>
             ))}
@@ -180,9 +181,9 @@ export default function ShipmentFilters({
 
         {/* Hãng tàu */}
         <div className="w-full md:w-36">
-          <label className={labelCls}>Hãng tàu</label>
+          <label className={labelCls}>{t("carrier")}</label>
           <select id="filter-vessel" value={filter.vessel || ""} onChange={handleVessel} className={inputCls}>
-            <option value="">Tất cả</option>
+            <option value="">{t("all")}</option>
             {VESSEL_OPTIONS.map(v => (
               <option key={v} value={v}>{v}</option>
             ))}
@@ -194,13 +195,13 @@ export default function ShipmentFilters({
       <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end md:flex-wrap">
         {/* Lọc theo */}
         <div className="w-full md:w-28">
-          <label className={labelCls}>Lọc theo</label>
+          <label className={labelCls}>{t("filterBy")}</label>
           <div id="filter-datefield" className={inputCls}>ETA</div>
         </div>
 
         {/* Từ ngày */}
         <div className="w-full md:w-44">
-          <label className={labelCls}>Từ ngày</label>
+          <label className={labelCls}>{t("fromDate")}</label>
           <div className="relative">
             <input
               id="filter-date-from"
@@ -222,7 +223,7 @@ export default function ShipmentFilters({
 
         {/* Đến ngày */}
         <div className="w-full md:w-44">
-          <label className={labelCls}>Đến ngày</label>
+          <label className={labelCls}>{t("toDate")}</label>
           <div className="relative">
             <input
               id="filter-date-to"
@@ -253,13 +254,13 @@ export default function ShipmentFilters({
               <line x1="18" y1="6" x2="6" y2="18"/>
               <line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
-            Xóa bộ lọc
+            {t("clearFilters")}
           </button>
         )}
 
         {/* Nhanh */}
         <div className="flex items-center gap-2 ml-auto">
-          <span className="text-xs text-gray-400">Nhanh:</span>
+          <span className="text-xs text-gray-400">{t("quick")}</span>
           {(["today", "week", "month"] as const).map((p) => {
             const now = new Date();
             const today = now.toISOString().split("T")[0];
@@ -279,7 +280,7 @@ export default function ShipmentFilters({
                 onClick={() => onChange({ ...filter, dateFrom: fromDate, dateTo: today, dateField: filter.dateField || "eta" })}
                 className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-medium text-gray-600 hover:bg-brand-50 hover:border-brand-200 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-brand-500/10 dark:hover:text-brand-400 transition-colors"
               >
-                {p === "today" ? "Hôm nay" : p === "week" ? "7 ngày" : "30 ngày"}
+                {p === "today" ? t("today") : p === "week" ? t("sevenDays") : t("thirtyDays")}
               </button>
             );
           })}

@@ -9,6 +9,7 @@ import {
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
+import { useLanguage } from "@/context/LanguageContext";
 
 type NotificationKind = "missing_docs" | "delivered" | "route_warning";
 
@@ -63,7 +64,7 @@ function normalizeType(value?: string): string {
   return String(value || "").trim().toUpperCase();
 }
 
-function mapRows(rows: NotificationRow[]): NotificationItem[] {
+function mapRows(rows: NotificationRow[], translate: (key: string, variables?: Record<string, string | number>) => string): NotificationItem[] {
   return rows
     .map((row, index) => {
       const type = normalizeType(row.type || row.name);
@@ -76,15 +77,15 @@ function mapRows(rows: NotificationRow[]): NotificationItem[] {
       const routeWarning = type === "VUOT_LO_TRINH";
       const kind: NotificationKind = delivered ? "delivered" : routeWarning ? "route_warning" : "missing_docs";
       const title = delivered
-        ? "Giao hàng thành công"
+        ? translate("delivered")
         : routeWarning
-          ? "Cảnh báo vượt lộ trình"
-          : "Cảnh báo chứng từ";
+          ? translate("routeWarning")
+          : translate("documentWarning");
       const body = message || (delivered
-        ? `Đơn hàng ${orderCode} đã giao hàng thành công`
+        ? translate("deliveredBody", { orderCode })
         : routeWarning
-          ? `Đơn hàng ${orderCode} vượt lộ trình${missingDocs ? `. Còn thiếu: ${missingDocs}` : ""}`
-          : `Đơn hàng ${orderCode} đang thiếu chứng từ${missingDocs ? `: ${missingDocs}` : ""}`);
+          ? `${translate("routeWarningBody", { orderCode })}${missingDocs ? `. ${translate("missingSuffix")}: ${missingDocs}` : ""}`
+          : `${translate("missingDocumentBody", { orderCode })}${missingDocs ? `: ${missingDocs}` : ""}`);
 
       return {
         id: String(row.id ?? `${type}-${orderCode}-${time}-${index}`),
@@ -133,6 +134,7 @@ function badgeTone(kind: NotificationKind): string {
 }
 
 export default function NotificationDropdown() {
+  const { t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -143,12 +145,12 @@ export default function NotificationDropdown() {
   const [isMarkingRead, setIsMarkingRead] = useState(false);
 
   const applyRows = useCallback((rows: NotificationRow[], announce = false) => {
-    const mapped = mapRows(rows);
+    const mapped = mapRows(rows, t);
     setNotifications(mapped);
     setError("");
     setLoading(false);
     if (announce && mapped.some(isUnread)) setHasNewNotification(true);
-  }, []);
+  }, [t]);
 
   const refreshNotifications = useCallback(async (announce = false) => {
     try {
@@ -198,7 +200,7 @@ export default function NotificationDropdown() {
       const rows = await getSheetNoti();
       const notificationRows = rows as NotificationRow[];
       applyRows(notificationRows);
-      if (mapRows(notificationRows).some(isUnread)) {
+      if (mapRows(notificationRows, t).some(isUnread)) {
         setError("Backend đã nhận yêu cầu nhưng Sheet vẫn còn thông báo status = 0. Kiểm tra hàm markAllNotificationsRead phía Backend/Apps Script.");
       }
     } catch (markError) {
@@ -247,7 +249,7 @@ export default function NotificationDropdown() {
       <button
         type="button"
         onClick={handleToggle}
-        title="Thông báo"
+        title={t("notifications")}
         className="relative flex h-11 w-11 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white"
       >
         {unreadCount > 0 && (
@@ -263,7 +265,7 @@ export default function NotificationDropdown() {
       <Dropdown isOpen={isOpen} onClose={() => setIsOpen(false)} className="absolute -right-[240px] mt-[17px] flex w-[350px] flex-col rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-lg dark:border-gray-800 dark:bg-gray-dark sm:w-[361px] lg:right-0">
         <div className="mb-3 flex items-center justify-between border-b border-gray-100 pb-3 dark:border-gray-700">
           <div>
-            <h5 className="text-lg font-semibold text-gray-800 dark:text-gray-200">Thông báo</h5>
+            <h5 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{t("notifications")}</h5>
             <p className="text-xs text-gray-500 dark:text-gray-400">{unreadCount} thông báo chưa đọc</p>
           </div>
           <button type="button" onClick={() => setIsOpen(false)} aria-label="Đóng thông báo" className="text-2xl leading-none text-gray-500 hover:text-gray-700 dark:text-gray-400">×</button>
@@ -290,7 +292,7 @@ export default function NotificationDropdown() {
 
           {notifications.length > 0 && (
             <button type="button" onClick={() => void handleViewAll()} disabled={isMarkingRead} className="mt-3 w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">
-              {isMarkingRead ? "Đang cập nhật..." : "Xem tất cả thông báo"}
+              {isMarkingRead ? t("updating") : t("viewAllNotifications")}
             </button>
           )}
         </div>

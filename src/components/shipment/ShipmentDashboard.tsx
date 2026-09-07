@@ -10,6 +10,7 @@ import ShipmentDetailModal from "./ShipmentDetailModal";
 import CreateShipmentModal from "./CreateShipmentModal";
 import { useAuth } from "@/context/AuthContext";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
+import { useLanguage } from "@/context/LanguageContext";
 
 function normalizeFilterValue(value?: string): string {
   return String(value || "")
@@ -29,6 +30,7 @@ function containsFilterValue(source?: string, selected?: string): boolean {
 
 export default function ShipmentDashboard() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const canCreateShipment = canPerformShipmentAction(user, "createShipment");
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [lastUpdated, setLastUpdated] = useState<string>(new Date().toISOString());
@@ -158,16 +160,16 @@ export default function ShipmentDashboard() {
       <div className="flex items-start justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-900 dark:text-white">
-            Dashboard Xuất Nhập Khẩu
+            {t("dashboardTitle")}
           </h1>
           <p className="text-sm text-gray-400 mt-0.5">
-            Theo dõi và quản lý toàn bộ lô hàng • Hải quan & Vận chuyển
+            {t("dashboardSubtitle")}
           </p>
         </div>
         <div className="flex items-center gap-3">
         {canCreateShipment && (
           <button type="button" onClick={() => setIsCreateModalOpen(true)} className="rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-600">
-            + Tạo đơn hàng mới
+            {t("createShipment")}
           </button>
         )}
         {isLoading && (
@@ -177,7 +179,7 @@ export default function ShipmentDashboard() {
               <polyline points="1 20 1 14 7 14"/>
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
-            Đang tải từ Google Sheet...
+            {t("loadingSheet")}
           </div>
         )}
         </div>
@@ -192,7 +194,7 @@ export default function ShipmentDashboard() {
             <line x1="12" y1="17" x2="12.01" y2="17"/>
           </svg>
           <div className="flex-1">
-            <p className="text-sm font-semibold text-error-700 dark:text-error-400">Lỗi kết nối API</p>
+            <p className="text-sm font-semibold text-error-700 dark:text-error-400">{t("apiConnectionError")}</p>
             <p className="text-xs text-error-600 dark:text-error-500 mt-0.5">{apiError}</p>
           </div>
           <button onClick={() => setApiError(null)} className="text-error-400 hover:text-error-600 transition-colors">
@@ -232,7 +234,7 @@ export default function ShipmentDashboard() {
               <polyline points="1 20 1 14 7 14"/>
               <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
             </svg>
-            <p className="text-sm">Đang tải dữ liệu từ Google Sheet...</p>
+            <p className="text-sm">{t("loadingSheet")}</p>
           </div>
         </div>
       ) : (

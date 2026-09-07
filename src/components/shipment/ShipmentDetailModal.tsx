@@ -10,6 +10,7 @@ import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
+import { useLanguage } from "@/context/LanguageContext";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 
@@ -22,10 +23,10 @@ interface ShipmentDetailModalProps {
 
 type ModalTab = "overview" | "journey" | "documents" | "return" | "details" | "folder";
 
-const TAB_LIST: { key: ModalTab; label: string; icon: React.ReactNode }[] = [
+const TAB_LIST: { key: ModalTab; labelKey: string; icon: React.ReactNode }[] = [
   {
     key: "overview",
-    label: "Tổng quan",
+    labelKey: "overview",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="7" height="7"/>
@@ -37,7 +38,7 @@ const TAB_LIST: { key: ModalTab; label: string; icon: React.ReactNode }[] = [
   },
   {
     key: "journey",
-    label: "Hành trình",
+    labelKey: "journey",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10"/>
@@ -48,7 +49,7 @@ const TAB_LIST: { key: ModalTab; label: string; icon: React.ReactNode }[] = [
   },
   {
     key: "documents",
-    label: "Chứng từ",
+    labelKey: "documentTab",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -69,7 +70,7 @@ const TAB_LIST: { key: ModalTab; label: string; icon: React.ReactNode }[] = [
   // },
   {
     key: "return",
-    label: "Hạ rỗng",
+    labelKey: "emptyReturn",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 17h18"/><path d="M5 17V8h14v9"/><path d="M8 8V5h8v3"/><circle cx="7" cy="19" r="2"/><circle cx="17" cy="19" r="2"/>
@@ -78,7 +79,7 @@ const TAB_LIST: { key: ModalTab; label: string; icon: React.ReactNode }[] = [
   },
   {
     key: "details",
-    label: "Chi tiết",
+    labelKey: "details",
     icon: (
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/>
@@ -595,6 +596,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const { user } = useAuth();
   const { notify } = useSystemNotification();
   const { confirm } = useSystemConfirm();
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<ModalTab>("overview");
   const [archived, setArchived] = useState<ArchivedDocumentsResponse | null>(null);
   const [isArchiveLoading, setIsArchiveLoading] = useState(false);
@@ -1098,7 +1100,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             }`}
           >
             {tab.icon}
-            {tab.label}
+            {t(tab.labelKey)}
           </button>
         ))}
       </div>

@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface CreateShipmentModalProps {
   isOpen: boolean;
@@ -78,6 +79,7 @@ function fileToBase64(file: File): Promise<string> {
 export default function CreateShipmentModal({ isOpen, onClose, onCreated, existingOrderCodes }: CreateShipmentModalProps) {
   const { user } = useAuth();
   const { notify } = useSystemNotification();
+  const { t } = useLanguage();
   const canCreateShipment = canPerformShipmentAction(user, "createShipment");
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
@@ -221,16 +223,16 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     <>
       <Modal isOpen={isOpen} onClose={handleClose} className="mx-2 flex max-h-[96vh] max-w-5xl flex-col overflow-hidden sm:mx-4 sm:max-h-[94vh]">
       <div className="border-b border-gray-100 px-6 pb-4 pt-6 dark:border-gray-800">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Tạo đơn hàng mới</h2>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("createNewShipment")}</h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Chọn file PI để hệ thống OCR phân tích thông tin.</p>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-6 py-5 custom-scrollbar">
         <input ref={inputRef} type="file" accept=".pdf,application/pdf" className="hidden" onChange={handleFileChange} />
         <button type="button" onClick={() => inputRef.current?.click()} disabled={!canCreateShipment || isAnalyzing || isSaving} className="rounded-xl border border-dashed border-brand-300 bg-brand-50 px-4 py-5 text-sm font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/40 dark:bg-brand-500/10 dark:text-brand-300">
-          {file ? file.name : "Chọn file PI (PDF)"}
+          {file ? file.name : t("selectPi")}
         </button>
 
-        {isAnalyzing && <p className="text-center text-sm text-gray-500">Đang phân tích PI bằng OCR...</p>}
+        {isAnalyzing && <p className="text-center text-sm text-gray-500">{t("analyzingPi")}</p>}
         {duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">Mã PI <strong>{fields.orderCode.trim()}</strong> đã tồn tại trong Sheet Summary. Vui lòng kiểm tra lại file PI.</p>}
         {error && !duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{error}</p>}
 
@@ -255,7 +257,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
             </div>
             {hasMissingRequiredFields && (
               <p className="text-xs text-error-600 dark:text-error-400">
-                Còn thiếu thông tin bắt buộc: {missingRequiredFields.join(", ")}.
+                {t("requiredMissing", { fields: missingRequiredFields.join(", ") })}
               </p>
             )}
           </>
@@ -263,8 +265,8 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       </div>
       <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 px-6 py-4 dark:border-gray-800">
         {filePreviewUrl && <button type="button" onClick={() => setIsFilePanelOpen(true)} className="rounded-lg border border-brand-200 bg-brand-50 px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Xem file PI</button>}
-        <button type="button" onClick={handleClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">Hủy</button>
-        <button type="button" onClick={handleConfirm} disabled={!canCreateShipment || !file || isAnalyzing || isSaving || duplicateOrderCode || hasMissingRequiredFields} title={hasMissingRequiredFields ? `Còn thiếu: ${missingRequiredFields.join(", ")}` : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? "Đang lưu..." : "Xác nhận tạo đơn"}</button>
+        <button type="button" onClick={handleClose} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
+        <button type="button" onClick={handleConfirm} disabled={!canCreateShipment || !file || isAnalyzing || isSaving || duplicateOrderCode || hasMissingRequiredFields} title={hasMissingRequiredFields ? t("requiredMissing", { fields: missingRequiredFields.join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSaving ? t("saving") : t("confirmCreate")}</button>
       </div>
     </Modal>
       {isFilePanelOpen && filePreviewUrl && (
