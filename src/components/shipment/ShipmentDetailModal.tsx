@@ -116,13 +116,13 @@ const DOC_STATUS_MAP: Record<string, { label: string; color: string; dot: string
 };
 
 const FLOW_STAGES: ShipmentFlowStage[] = [
-  { key: "buying", label: "Bổ sung INV / PKL", shortLabel: "INV/PKL" },
-  { key: "shipping", label: "Chứng từ vận chuyển biển", shortLabel: "BL..." },
-  { key: "arrived", label: "Đã đến cảng", shortLabel: "Cảng" },
-  { key: "declared", label: "Nộp tờ khai", shortLabel: "Tờ khai" },
+  { key: "buying", label: "Lên đơn hàng", shortLabel: "INV / PKL" },
+  { key: "shipping", label: "Vận chuyển trên biển", shortLabel: "BL / CO / HC" },
+  { key: "arrived", label: "Kiểm dịch hàng hóa", shortLabel: "DON_KD" },
+  { key: "declared", label: "Khai báo hải quan", shortLabel: "BB_LM / PHI_TK / THUE_NK / TK" },
   { key: "fifteenb", label: "Mẫu 15B", shortLabel: "15B" },
-  { key: "customs", label: "Thông quan", shortLabel: "MV/QDTQ" },
-  { key: "delivered", label: "Giao hàng thành công", shortLabel: "Trả công" },
+  { key: "customs", label: "Thông quan", shortLabel: "QDTQ / MV" },
+  { key: "delivered", label: "Giao hàng / Trả công", shortLabel: "TRA_CONG" },
 ];
 
 const STAGE_DOC_GROUPS: Record<Exclude<ShipmentFlowStage["key"], "delivered">, string[]> = {

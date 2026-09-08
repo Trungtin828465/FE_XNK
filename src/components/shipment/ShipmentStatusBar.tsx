@@ -27,12 +27,12 @@ interface ShipmentStatusBarProps {
 
 const STAGE_ICON: Record<ShipmentFlowStageKey, React.ReactNode> = {
   buying: <span className="flex flex-col text-[7px] font-bold leading-[8px]"><span>INV</span><span>PKL</span></span>,
-  shipping: <span className="text-[10px] font-bold">S2</span>,
-  arrived: <span className="text-[10px] font-bold">S3</span>,
-  declared: <span className="text-[10px] font-bold">S4</span>,
+  shipping: <span className="flex flex-col text-[7px] font-bold leading-[7px]"><span>BL</span><span>CO/HC</span></span>,
+  arrived: <span className="flex flex-col text-[7px] font-bold leading-[7px]"><span>DON</span><span>KD</span></span>,
+  declared: <span className="text-[9px] font-bold">TK</span>,
   fifteenb: <span className="text-[10px] font-bold">15B</span>,
-  customs: <span className="text-[10px] font-bold">S6</span>,
-  delivered: <span className="text-[10px] font-bold">OK</span>,
+  customs: <span className="flex flex-col text-[7px] font-bold leading-[7px]"><span>QDTQ</span><span>MV</span></span>,
+  delivered: <span className="flex flex-col text-[7px] font-bold leading-[7px]"><span>TRA</span><span>CONG</span></span>,
 };
 
 export default function ShipmentStatusBar({ activeStage, stages, isLate, hasOutOfOrderDocs, activeStageMessage }: ShipmentStatusBarProps) {
@@ -87,7 +87,7 @@ export default function ShipmentStatusBar({ activeStage, stages, isLate, hasOutO
                   {STAGE_ICON[stage.key]}
                 </div>
                 <div className="mt-2 min-h-[2.5rem]">
-                  <p className={`text-[10px] font-semibold leading-tight ${labelCls[tone]}`}>
+                  <p className={`break-words text-[9px] font-semibold leading-tight ${labelCls[tone]}`}>
                     {stage.shortLabel}
                   </p>
                   <p className={`mt-0.5 text-[9px] leading-tight ${subCls[tone]}`}>
