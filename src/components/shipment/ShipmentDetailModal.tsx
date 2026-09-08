@@ -88,16 +88,32 @@ const TAB_LIST: { key: ModalTab; labelKey: string; icon: React.ReactNode }[] = [
   },
 ];
 
-const RETURN_FIELDS: { key: keyof ReturnItem; labelKey: string }[] = [
-  { key: "ngay", labelKey: "day" },
-  { key: "soCont", labelKey: "containerNumberShort" },
-  { key: "soHd", labelKey: "orderNumber" },
-  { key: "nhaXe", labelKey: "carrierCompany" },
-  { key: "xeTai", labelKey: "vehicleDriver" },
-  { key: "noiLayHang", labelKey: "pickupLocation" },
-  { key: "noiTraHang", labelKey: "deliveryLocation" },
-  { key: "noiHaRong", labelKey: "emptyReturnLocation" },
-  { key: "nhapXuat", labelKey: "importExportType" },
+const RETURN_FIELD_GROUPS: Array<{
+  labelKey: string;
+  fields: Array<{ key: keyof ReturnItem; labelKey: string }>;
+}> = [
+  {
+    labelKey: "orderContainerGroup",
+    fields: [
+      { key: "soHd", labelKey: "orderNumber" },
+      { key: "soCont", labelKey: "containerNumberShort" },
+    ],
+  },
+  {
+    labelKey: "transportLocationsGroup",
+    fields: [
+      { key: "noiLayHang", labelKey: "pickupLocation" },
+      { key: "noiHaRong", labelKey: "emptyReturnLocation" },
+      { key: "noiTraHang", labelKey: "deliveryLocation" },
+    ],
+  },
+  {
+    labelKey: "vehicleContainerGroup",
+    fields: [
+      { key: "nhapXuat", labelKey: "containerType" },
+      { key: "xeTai", labelKey: "vehicleNumber" },
+    ],
+  },
 ];
 
 const STATUS_MAP: Record<string, { label: string; color: string; bg: string; dot: string }> = {
@@ -1569,31 +1585,67 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             {isReturnLoading ? (
               <p className="py-8 text-center text-sm text-gray-400">{t("loadingEmptyReturn")}</p>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {RETURN_FIELDS.map(({ key, labelKey }) => {
-                  const label = t(labelKey);
-                  return (
-                  <div key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                    <span>{label}</span>
-                    {key === "ngay" ? (
-                      <DateFieldInput
-                        label={label}
-                        value={returnForm?.[key]}
-                        disabled={!canEditReturnItem || !isReturnEditing}
-                        onChange={(value) => setReturnForm((current) => current ? { ...current, [key]: value } : current)}
-                      />
-                    ) : (
-                      <input
-                        type="text"
-                        value={returnForm?.[key] || ""}
-                        disabled={!canEditReturnItem || !isReturnEditing || key === "soHd"}
-                        onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)}
-                        className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                      />
-                    )}
+              <div className="flex flex-col gap-4">
+                <div className="grid gap-4 lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1.7fr)]">
+                  <section className="rounded-2xl border border-brand-100 bg-brand-50/50 p-4 dark:border-brand-500/20 dark:bg-brand-500/5">
+                    <div className="mb-4 flex items-center gap-2">
+                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-white"><CalendarIcon /></span>
+                      <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t("returnDate")}</h4>
+                    </div>
+                    <DateFieldInput
+                      label={t("returnDate")}
+                      value={returnForm?.ngay}
+                      disabled={!canEditReturnItem || !isReturnEditing}
+                      onChange={(value) => setReturnForm((current) => current ? { ...current, ngay: value } : current)}
+                    />
+                  </section>
+
+                  <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.02]">
+                    <div className="mb-4 flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-50 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">01</span>
+                      <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[0].labelKey)}</h4>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {RETURN_FIELD_GROUPS[0].fields.map(({ key, labelKey }) => (
+                        <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                          <span>{t(labelKey)}</span>
+                          <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "soHd"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+
+                <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.02]">
+                  <div className="mb-4 flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-50 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">02</span>
+                    <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[1].labelKey)}</h4>
                   </div>
-                  );
-                })}
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {RETURN_FIELD_GROUPS[1].fields.map(({ key, labelKey }, index) => (
+                      <label key={key} className="relative flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                        <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-brand-400" />{t(labelKey)}</span>
+                        <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                        {index < RETURN_FIELD_GROUPS[1].fields.length - 1 && <span className="absolute -right-2 top-[2.4rem] hidden text-gray-300 md:block"></span>}
+                      </label>
+                    ))}
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-white/[0.02]">
+                  <div className="mb-4 flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-50 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">03</span>
+                    <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[2].labelKey)}</h4>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {RETURN_FIELD_GROUPS[2].fields.map(({ key, labelKey }) => (
+                      <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
+                        <span>{t(labelKey)}</span>
+                        <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                      </label>
+                    ))}
+                  </div>
+                </section>
               </div>
             )}
             {canEditReturnItem && isReturnEditing && (
