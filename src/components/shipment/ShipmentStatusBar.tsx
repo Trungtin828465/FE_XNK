@@ -26,7 +26,7 @@ interface ShipmentStatusBarProps {
 }
 
 const STAGE_ICON: Record<ShipmentFlowStageKey, React.ReactNode> = {
-  buying: <span className="text-[10px] font-bold">PI</span>,
+  buying: <span className="flex flex-col text-[7px] font-bold leading-[8px]"><span>INV</span><span>PKL</span></span>,
   shipping: <span className="text-[10px] font-bold">S2</span>,
   arrived: <span className="text-[10px] font-bold">S3</span>,
   declared: <span className="text-[10px] font-bold">S4</span>,

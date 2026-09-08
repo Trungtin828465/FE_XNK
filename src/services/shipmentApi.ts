@@ -17,8 +17,9 @@ const DOCUMENT_CODES = [
 ] as const;
 
 const FLOW_DOCUMENT_GROUPS: Array<{ key: Shipment["flowStageKey"]; docs: string[] }> = [
-  { key: "buying", docs: ["PI"] },
-  { key: "shipping", docs: ["INV", "PKL", "BL", "CO", "HC"] },
+  // Đơn đã xuất hiện trong bảng nghĩa là PI đã được tạo. Hành trình bắt đầu từ INV/PKL.
+  { key: "buying", docs: ["INV", "PKL"] },
+  { key: "shipping", docs: ["BL", "CO", "HC"] },
   { key: "arrived", docs: ["DON_KD"] },
   { key: "declared", docs: ["BB_LM", "PHI_TK", "THUE_NK", "TK"] },
   { key: "fifteenb", docs: ["15B"] },
