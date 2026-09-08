@@ -718,38 +718,39 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const detailFields = (Object.keys(detailForm).length > 0 ? Object.keys(detailForm) : [...SUMMARY_FIELDS])
     .filter((field) => field.trim().toLowerCase() !== "stt");
   const statusInfo = STATUS_MAP[shipment.status];
-  const statusLabelKeys: Record<string, string> = { cancelled: "cancelledStatus", shipping: "shipping", completed: "completed", missing_docs: "missingDocumentsStatus" };
-  const flowLabel = language === "en"
-    ? t(statusLabelKeys[shipment.status] || "status")
-    : isCancelled ? statusInfo?.label : shipment.flowStageLabel || statusInfo?.label;
+  const stageLabelKeys: Record<NonNullable<Shipment["flowStageKey"]>, string> = {
+    buying: "stageBuying",
+    shipping: "stageShipping",
+    arrived: "stageArrived",
+    declared: "stageDeclared",
+    fifteenb: "stageFifteenB",
+    customs: "stageCustoms",
+    delivered: "stageDelivered",
+  };
+  const flowLabel = isCancelled
+    ? t("cancelledStatus")
+    : shipment.flowStageKey
+      ? t(stageLabelKeys[shipment.flowStageKey])
+      : statusInfo?.label;
   const localizedFlowStages = FLOW_STAGES.map((stage) => ({
     ...stage,
-    label: t({ buying: "stageBuying", shipping: "stageShipping", arrived: "stageArrived", declared: "stageDeclared", fifteenb: "stageFifteenB", customs: "stageCustoms", delivered: "stageDelivered" }[stage.key]),
+    label: t(stageLabelKeys[stage.key]),
   }));
   const hasStageWarning = hasOutOfOrderDocuments(shipment);
-  // const flowColor = shipment.flowStageKey === "delivered"
-  //   ? "text-success-600 bg-success-50 dark:bg-success-500/10"
-  //   : shipment.flowStageKey === "buying"
-  //   ? hasStageWarning
-  //     ? "text-error-600 bg-error-50 dark:bg-error-500/10"
-  //     : "text-amber-700 bg-amber-50 dark:bg-amber-500/10"
-  //   : hasStageWarning || shipment.flowStageLate
-  //   ? "text-error-600 bg-error-50 dark:bg-error-500/10"
-  //   : "text-blue-light-600 bg-blue-light-50 dark:bg-blue-light-500/10";
-
   const flowColor = isCancelled
-  ? "text-gray-600 bg-gray-100 dark:bg-gray-500/10 dark:text-gray-300"
-  : shipment.flowStageKey === "delivered"
-  ? "text-success-600 bg-success-50 dark:bg-success-500/10"
-
-  : shipment.flowStageKey === "buying"
-  ? hasStageWarning
-    ? "text-blue-light-600 bg-blue-light-50 dark:bg-blue-light-500/10"
-    : "text-amber-700 bg-amber-50 dark:bg-amber-500/10"
-
-  : hasStageWarning || shipment.flowStageLate
-  ? "text-blue-light-600 bg-blue-light-50 dark:bg-blue-light-500/10"
-  : "text-blue-light-600 bg-blue-light-50 dark:bg-blue-light-500/10";
+    ? "text-error-600 bg-error-50 dark:bg-error-500/10 dark:text-error-400"
+    : shipment.flowStageKey === "delivered"
+      ? "text-success-600 bg-success-50 dark:bg-success-500/10"
+      : shipment.flowStageKey === "buying"
+        ? "text-amber-700 bg-amber-50 dark:bg-amber-500/10"
+        : "text-blue-light-600 bg-blue-light-50 dark:bg-blue-light-500/10";
+  const flowDotColor = isCancelled
+    ? "bg-error-500"
+    : shipment.flowStageKey === "delivered"
+      ? "bg-success-500"
+      : shipment.flowStageKey === "buying"
+        ? "bg-amber-500"
+        : "bg-blue-light-500";
   const documentsSorted = [...(shipment.documents || [])].sort((a, b) => {
     const orderA = DOCUMENT_DISPLAY_ORDER.indexOf(a.id.toUpperCase());
     const orderB = DOCUMENT_DISPLAY_ORDER.indexOf(b.id.toUpperCase());
@@ -1090,7 +1091,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               {shipment.orderCode}
             </h2>
             <span className={`inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ${flowColor}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${statusInfo?.dot || "bg-current"}`} />
+              <span className={`w-1.5 h-1.5 rounded-full ${flowDotColor}`} />
               <span className="truncate">{flowLabel}</span>
             </span>
           </div>
@@ -1130,7 +1131,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4 custom-scrollbar sm:px-6 sm:py-5">
 
         {isCancelled && (
-          <div className="mb-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-300">
+          <div className="mb-4 rounded-xl bg-error-50 px-4 py-3 text-sm font-medium text-error-600 dark:bg-error-500/10 dark:text-error-400">
             {t("cancelledReadOnly")}
           </div>
         )}

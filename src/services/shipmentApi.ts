@@ -26,6 +26,16 @@ const FLOW_DOCUMENT_GROUPS: Array<{ key: Shipment["flowStageKey"]; docs: string[
   { key: "customs", docs: ["QDTQ", "MV"] },
 ];
 
+const FLOW_STAGE_LABELS: Record<NonNullable<Shipment["flowStageKey"]>, string> = {
+  buying: "Lên đơn hàng",
+  shipping: "Vận chuyển trên biển",
+  arrived: "Kiểm dịch hàng hóa",
+  declared: "Khai báo hải quan",
+  fifteenb: "Mẫu 15B",
+  customs: "Thông quan",
+  delivered: "Giao hàng / Trả công",
+};
+
 export const SUMMARY_FIELDS = [
   "Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng",
   "INV", "Ngày INV", "Số hộp", "Trọng lượng", "Trọng lượng cả bì", "BL NO.",
@@ -159,7 +169,7 @@ function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, ind
     trlg: parseNumber(getSheetValue(row, "Trọng lượng")),
     giaB: parseNumber(getSheetValue(row, "Giá tổng")),
     flowStageKey,
-    flowStageLabel: completed ? "Hoàn thành" : "Đang xử lý",
+    flowStageLabel: completed ? "Hoàn thành" : FLOW_STAGE_LABELS[flowStageKey],
     updatedAt: total?.time_update || new Date().toISOString(),
     summaryFields,
     createdAt: parseDate(getSheetValue(row, "Ngày HĐ PI")) || new Date().toISOString(),
