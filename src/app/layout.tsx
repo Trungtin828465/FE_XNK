@@ -1,16 +1,10 @@
-import { Outfit } from 'next/font/google';
 import './globals.css';
-import "flatpickr/dist/flatpickr.css";
 import { SidebarProvider } from '@/context/SidebarContext';
 import { ThemeProvider } from '@/context/ThemeContext';
 import { AuthProvider } from '@/context/AuthContext';
 import { SystemNotificationProvider } from '@/context/SystemNotificationContext';
 import { SystemConfirmProvider } from '@/context/SystemConfirmContext';
 import { LanguageProvider } from '@/context/LanguageContext';
-
-const outfit = Outfit({
-  subsets: ["latin"],
-});
 
 export default function RootLayout({
   children,
@@ -19,7 +13,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="vi">
-      <body className={`${outfit.className} dark:bg-gray-900`}>
+      <body className="dark:bg-gray-900">
         <LanguageProvider>
           <ThemeProvider>
             <AuthProvider>

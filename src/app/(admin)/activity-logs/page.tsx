@@ -15,6 +15,9 @@ const ACTION_LABELS: Record<string, string> = {
   EDIT_RETURN_ITEM: "Sửa thông tin hạ rỗng",
   EDIT_SHIPMENT_DETAILS: "Sửa chi tiết đơn hàng",
   CANCEL_SHIPMENT: "Hủy đơn hàng",
+  REGISTER_USER: "Đăng ký tài khoản",
+  UPDATE_USER_PERMISSION: "Sửa quyền tài khoản",
+  UPDATE_USER_PASSWORD: "Đặt lại mật khẩu",
 };
 
 function getActionLabel(action: string): string {

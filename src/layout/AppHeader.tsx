@@ -3,7 +3,6 @@ import { ThemeToggleButton } from "@/components/common/ThemeToggleButton";
 import NotificationDropdown from "@/components/header/NotificationDropdown";
 import UserDropdown from "@/components/header/UserDropdown";
 import { useSidebar } from "@/context/SidebarContext";
-import Image from "next/image";
 import Link from "next/link";
 import React, { useState ,useEffect,useRef} from "react";
 import { useLanguage } from "@/context/LanguageContext";
@@ -85,21 +84,9 @@ const AppHeader: React.FC = () => {
             {/* Cross Icon */}
           </button>
 
-          <Link href="/" className="lg:hidden">
-            <Image
-              width={154}
-              height={32}
-              className="dark:hidden"
-              src="./images/logo/logo.svg"
-              alt="Logo"
-            />
-            <Image
-              width={154}
-              height={32}
-              className="hidden dark:block"
-              src="./images/logo/logo-dark.svg"
-              alt="Logo"
-            />
+          <Link href="/" className="flex items-center gap-2 font-semibold text-gray-900 dark:text-white lg:hidden">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-500 text-xs font-bold text-white">XNK</span>
+            <span>{t("importExport")}</span>
           </Link>
 
           <button

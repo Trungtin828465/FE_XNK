@@ -5,6 +5,7 @@ import AvatarText from "../ui/avatar/AvatarText";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
 import React, { useState } from "react";
+import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 
 export default function UserDropdown() {
   const [isOpen, setIsOpen] = useState(false);
@@ -21,6 +22,7 @@ export default function UserDropdown() {
 
   const displayName = user?.name || "Guest";
   const role = user?.role || "Guest";
+  const canManageUsers = canPerformShipmentAction(user, "manageUsers");
 
   return (
     <div className="relative">
@@ -73,6 +75,11 @@ export default function UserDropdown() {
         </div>
 
         <ul className="flex flex-col gap-1 border-b border-gray-200 pb-3 pt-4 dark:border-gray-800">
+          {canManageUsers && (
+            <>
+              <li><DropdownItem onItemClick={closeDropdown} tag="a" href="/account-management" className="group flex items-center gap-3 rounded-lg px-3 py-2 font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-300"><span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-50 text-sm font-bold text-brand-600 dark:bg-brand-500/10">+</span>Quản lý tài khoản</DropdownItem></li>
+            </>
+          )}
           <li>
             <DropdownItem
               onItemClick={closeDropdown}

@@ -15,6 +15,7 @@ const AppSidebar: React.FC = () => {
   const pathname = usePathname();
   const showText = isExpanded || isHovered || isMobileOpen;
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
+  const canManageUsers = canPerformShipmentAction(user, "manageUsers");
   const { t } = useLanguage();
 
   return (
@@ -89,6 +90,25 @@ const AppSidebar: React.FC = () => {
                   </svg>
                 </span>
                 {showText && <span className="menu-item-text">{t("activityLogs")}</span>}
+              </Link>
+            </li>
+          )}
+          {canManageUsers && (
+            <li>
+              <Link
+                href="/account-management"
+                className={`menu-item group ${
+                  pathname === "/account-management" ? "menu-item-active" : "menu-item-inactive"
+                } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
+              >
+                <span className={pathname === "/account-management" ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path d="M19 8v6M22 11h-6" />
+                  </svg>
+                </span>
+                {showText && <span className="menu-item-text">{t("accountManagement")}</span>}
               </Link>
             </li>
           )}

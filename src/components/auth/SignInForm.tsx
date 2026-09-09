@@ -9,6 +9,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import React, { useState } from "react";
+import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 
 export default function SignInForm() {
   const [showPassword, setShowPassword] = useState(false);
@@ -17,7 +18,9 @@ export default function SignInForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const { setUser } = useAuth();
+  const { user: currentUser, setUser } = useAuth();
+  const canManageUsers = canPerformShipmentAction(currentUser, "registerUser")
+    && canPerformShipmentAction(currentUser, "updateUserPassword");
   const router = useRouter();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -159,12 +162,7 @@ export default function SignInForm() {
                       Keep me logged in
                     </span>
                   </div>
-                  <Link
-                    href="/reset-password"
-                    className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400"
-                  >
-                    Forgot password?
-                  </Link>
+                  {canManageUsers && <Link href="/reset-password" className="text-sm text-brand-500 hover:text-brand-600 dark:text-brand-400">Quên mật khẩu?</Link>}
                 </div>
                 <div>
                   <Button className="w-full" size="sm" type="submit" disabled={loading}>
@@ -179,13 +177,7 @@ export default function SignInForm() {
 
             <div className="mt-5">
               <p className="text-sm font-normal text-center text-gray-700 dark:text-gray-400 sm:text-start">
-                Don&apos;t have an account? {""}
-                {/* <Link
-                  href="/signup"
-                  className="text-brand-500 hover:text-brand-600 dark:text-brand-400"
-                >
-                  Sign Up
-                </Link> */}
+                {canManageUsers && <>Quản lý tài khoản? <Link href="/signup" className="text-brand-500 hover:text-brand-600 dark:text-brand-400">Đăng ký tài khoản</Link></>}
               </p>
             </div>
           </div>
