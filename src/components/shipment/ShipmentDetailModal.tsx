@@ -373,7 +373,7 @@ function isDateDetailField(field: string): boolean {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]/g, "");
-  return normalized.startsWith("ngay") || normalized === "etd" || normalized === "eta";
+  return normalized.startsWith("ngay") || normalized === "etd" || normalized === "eta" || normalized === "ata";
 }
 
 function CalendarIcon() {
@@ -414,7 +414,7 @@ function DateFieldInput({
         value={toDateInputValue(value)}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
-        className="input-date-icon w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 pr-10 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+        className="input-date-icon h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 pr-10 text-sm font-normal text-gray-800 outline-none transition-colors focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
       />
       <button
         type="button"
@@ -459,7 +459,7 @@ function readFileAsBase64(file: File): Promise<string> {
 type OcrDocumentType = "PI" | "INV" | "PKL" | "BL";
 
 const OCR_REQUIRED_FIELDS: Record<OcrDocumentType, string[]> = {
-  PI: ["Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng"],
+  PI: ["Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng", "Đơn giá"],
   INV: ["INV", "Ngày INV"],
   PKL: ["Số hộp", "Trọng lượng", "Trọng lượng cả bì"],
   BL: ["BL NO.", "Số Container", "Hãng tàu", "ETD", "Cảng đến"],
@@ -471,19 +471,158 @@ function normalizeSheetField(value: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .trim()
     .toLowerCase()
+    .replace(/đ/g, "d")
     .replace(/[^a-z0-9]/g, "");
+}
+
+function formatSheetDateOnly(value: string): string {
+  const normalized = toDateInputValue(value);
+  if (normalized) {
+    const [year, month, day] = normalized.split("-");
+    return `${day}/${month}/${year}`;
+  }
+
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) {
+    return new Intl.DateTimeFormat("vi-VN", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(parsed);
+  }
+
+  return value;
 }
 
 function localizeSheetField(field: string, translate: (key: string) => string): string {
   const fieldKeys: Record<string, string> = {
     sohd: "orderNumber", ngayhdpi: "piDate", nhacungcap: "supplier", xuatxu: "origin",
-    tenhang: "productName", giatong: "goodsValue", inv: "invoiceNumber", ngayinv: "invoiceDate",
-    sohop: "boxCount", soluong: "boxCount", trongluong: "netWeight", trongluongcabi: "grossWeight",
-    blno: "billNumber", socontainer: "containerNumber", hangtau: "carrier", cangden: "destinationPort",
+    tennhamay: "factoryName", manhamay: "factoryCode", tenhang: "productName", itemcode: "itemCode",
+    mahang: "itemCode", dongia: "unitPrice", unitprice: "unitPrice", giatong: "totalAmount",
+    tongtien: "totalAmount", totalamount: "totalAmount", inv: "invoiceNumber", ngayinv: "invoiceDate",
+    sohop: "quantity", soluong: "quantity", quantity: "quantity",
+    trongluong: "netWeight", trongluongtinh: "netWeight", netweight: "netWeight",
+    khoiluongnet: "netWeight", trongluongcabi: "grossWeight", grossweight: "grossWeight",
+    khoiluonggross: "grossWeight", weight: "grossWeight", tiencoc: "depositAmount",
+    sotiencoc: "depositAmount",
+    sotienthanhtoan: "paymentAmount", tienthanhtoan: "paymentAmount", blno: "billNumber",
+    mabl: "billNumber", macontainer: "containerCode", macont: "containerCode", macong: "containerCode",
+    socontainer: "containerNumber", socont: "containerNumber", socong: "containerNumber",
+    hangtau: "carrier", cangden: "destinationPort", lenhthahang: "releaseOrder",
     etd: "estimatedDeparture", eta: "estimatedArrival", ata: "actualArrival", trangthai: "status",
   };
   const key = fieldKeys[normalizeSheetField(field)];
   return key ? translate(key) : field;
+}
+
+type DetailFieldGroupKey = "purchasing" | "internationalPayment" | "orderDetails" | "importExport";
+
+type DetailFieldDefinition = {
+  sheetField: string;
+  labelKey: string;
+};
+
+type DetailFieldGroup = {
+  key: DetailFieldGroupKey;
+  labelKey: string;
+  descriptionKey: string;
+  number: string;
+  badgeClass: string;
+  headerClass: string;
+  fields: DetailFieldDefinition[];
+};
+
+const DETAIL_FIELD_GROUPS: DetailFieldGroup[] = [
+  {
+    key: "purchasing",
+    labelKey: "detailGroupPurchasing",
+    descriptionKey: "detailGroupPurchasingDescription",
+    number: "01",
+    badgeClass: "bg-brand-500 text-white",
+    headerClass: "bg-brand-50/80 dark:bg-brand-500/10",
+    fields: [
+      { sheetField: "INV", labelKey: "invoiceNumber" },
+      { sheetField: "Ngày INV", labelKey: "invoiceDate" },
+      { sheetField: "Nhà cung cấp", labelKey: "supplier" },
+      { sheetField: "XUẤT XỨ", labelKey: "origin" },
+      { sheetField: "Mã nhà máy", labelKey: "factoryCode" },
+      { sheetField: "Tên nhà máy", labelKey: "factoryName" },
+    ],
+  },
+  {
+    key: "internationalPayment",
+    labelKey: "detailGroupInternationalPayment",
+    descriptionKey: "detailGroupInternationalPaymentDescription",
+    number: "02",
+    badgeClass: "bg-success-500 text-white",
+    headerClass: "bg-success-50/80 dark:bg-success-500/10",
+    fields: [
+      { sheetField: "Số tiền cọc", labelKey: "depositAmount" },
+      { sheetField: "Số tiền thanh toán", labelKey: "paymentAmount" },
+      { sheetField: "Lệnh thả hàng", labelKey: "releaseOrder" },
+    ],
+  },
+  {
+    key: "orderDetails",
+    labelKey: "detailGroupOrderDetails",
+    descriptionKey: "detailGroupOrderDetailsDescription",
+    number: "03",
+    badgeClass: "bg-warning-500 text-white",
+    headerClass: "bg-warning-50/80 dark:bg-warning-500/10",
+    fields: [
+      { sheetField: "Tên hàng", labelKey: "productName" },
+      { sheetField: "Item code", labelKey: "itemCode" },
+      { sheetField: "Đơn giá", labelKey: "unitPrice" },
+      { sheetField: "Số hộp", labelKey: "quantity" },
+      { sheetField: "Giá tổng", labelKey: "totalAmount" },
+      { sheetField: "Trọng lượng", labelKey: "netWeight" },
+      { sheetField: "Trọng lượng cả bì", labelKey: "grossWeight" },
+    ],
+  },
+  {
+    key: "importExport",
+    labelKey: "detailGroupImportExport",
+    descriptionKey: "detailGroupImportExportDescription",
+    number: "04",
+    badgeClass: "bg-purple-500 text-white",
+    headerClass: "bg-purple-50/80 dark:bg-purple-500/10",
+    fields: [
+      { sheetField: "BL NO.", labelKey: "billNumber" },
+      { sheetField: "Mã Container", labelKey: "containerCode" },
+      { sheetField: "Số container", labelKey: "containerNumber" },
+      { sheetField: "Hãng tàu", labelKey: "carrier" },
+      { sheetField: "Cảng đến", labelKey: "destinationPort" },
+      { sheetField: "ETD", labelKey: "estimatedDeparture" },
+      { sheetField: "ETA", labelKey: "estimatedArrival" },
+      { sheetField: "ATA", labelKey: "actualArrival" },
+    ],
+  },
+];
+
+function findActualSheetField(fields: string[], wantedField: string): string {
+  const wanted = normalizeSheetField(wantedField);
+  return fields.find((field) => normalizeSheetField(field) === wanted) || wantedField;
+}
+
+function getDetailGroupGridClass(group: DetailFieldGroupKey): string {
+  if (group === "internationalPayment" || group === "importExport") return "sm:grid-cols-3";
+  if (group === "orderDetails") return "sm:grid-cols-2 xl:grid-cols-4";
+  return "sm:grid-cols-2";
+}
+
+function getDetailFieldSpanClass(group: DetailFieldGroupKey, field: string): string {
+  const normalized = normalizeSheetField(field);
+  if (group === "orderDetails" && ["tenhang", "tensanpham"].includes(normalized)) {
+    return "xl:col-span-2";
+  }
+  if (group === "importExport" && normalized === "cangden") {
+    return "sm:col-span-2";
+  }
+  return "";
+}
+
+function isReadOnlyDetailField(field: string): boolean {
+  return ["stt", "sohd", "ordercode"].includes(normalizeSheetField(field));
 }
 
 function ensureRequiredOcrFields(data: Record<string, string>, documentType: OcrDocumentType): Record<string, string> {
@@ -739,9 +878,19 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     releaseOrder: getSummaryValue(summaryFields, ["Lệnh thả hàng", "Lệnh giao hàng", "Telex", "Telex release"]),
   };
   const etaRemaining = shipment.ata ? null : formatEtaRemaining(shipment.eta, currentDay, language);
-  // Tạm ẩn cột STT trong tab Chi tiết; dữ liệu gốc trong Sheet vẫn được giữ nguyên.
+  const piDate = getSummaryValue(summaryFields, ["Ngày HĐ PI", "Ngày PI", "PI Date"]);
+  const piDateDisplay = piDate ? formatSheetDateOnly(piDate) : "";
+  // Mã đơn đã nằm ở header và ngày PI được đưa lên cạnh mã đơn; dữ liệu gốc trong Sheet vẫn được giữ nguyên.
+  const hiddenDetailFields = new Set(["stt", "sohd", "ordercode", "madonhang", "mapi", "sopi", "ngayhdpi", "ngaypi"]);
   const detailFields = (Object.keys(detailForm).length > 0 ? Object.keys(detailForm) : [...SUMMARY_FIELDS])
-    .filter((field) => field.trim().toLowerCase() !== "stt");
+    .filter((field) => !hiddenDetailFields.has(normalizeSheetField(field)));
+  const groupedDetailFields = DETAIL_FIELD_GROUPS.map((group) => ({
+    ...group,
+    fields: group.fields.map(({ sheetField, labelKey }) => ({
+      field: findActualSheetField(detailFields, sheetField),
+      labelKey,
+    })),
+  }));
   const statusInfo = STATUS_MAP[shipment.status];
   const stageLabelKeys: Record<NonNullable<Shipment["flowStageKey"]>, string> = {
     buying: "stageBuying",
@@ -1162,6 +1311,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               <span className="truncate">{flowLabel}</span>
             </span>
           </div>
+          {piDateDisplay && (
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+              {t("piDate")}: <span className="font-semibold text-gray-700 dark:text-gray-200">{piDateDisplay}</span>
+            </p>
+          )}
           {shipment.soldAtSea && (
             <span className="text-xs font-semibold text-success-600 dark:text-success-400">
               {t("soldAtSea")}
@@ -1786,27 +1940,54 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 </div>
               )}
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {detailFields.map((field) => (
-                <div key={field} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
-                  <span>{localizeSheetField(field, t)}</span>
-                  {isDateDetailField(field) ? (
-                    <DateFieldInput
-                      label={field}
-                      value={detailForm[field]}
-                      disabled={!canEditDetails || !isDetailsEditing}
-                      onChange={(value) => setDetailForm((current) => ({ ...current, [field]: value }))}
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={detailForm[field] || ""}
-                      disabled={!canEditDetails || !isDetailsEditing || field.trim().toLowerCase() === "stt" || field.trim().toLowerCase() === "số hđ" || field.trim().toLowerCase() === "order_code" || field.trim().toLowerCase() === "order code"}
-                      onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))}
-                      className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                    />
-                  )}
-                </div>
+            <div className="grid gap-5">
+              {groupedDetailFields.map((group) => (
+                <section
+                  key={group.key}
+                  className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]"
+                >
+                  <div className={`flex items-center gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-gray-800 sm:px-5 ${group.headerClass}`}>
+                    <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-xs font-bold shadow-sm ${group.badgeClass}`}>
+                      {group.number}
+                    </span>
+                    <div className="min-w-0">
+                      <h4 className="text-sm font-bold text-gray-900 dark:text-white">{t(group.labelKey)}</h4>
+                      <p className="mt-0.5 text-xs leading-5 text-gray-500 dark:text-gray-400">{t(group.descriptionKey)}</p>
+                    </div>
+                  </div>
+                  <div className={`grid gap-x-4 gap-y-4 p-4 sm:p-5 ${getDetailGroupGridClass(group.key)}`}>
+                    {group.fields.map(({ field, labelKey }, fieldIndex) => (
+                      <React.Fragment key={field}>
+                        {group.key === "importExport" && isDateDetailField(field) && !group.fields.slice(0, fieldIndex).some((item) => isDateDetailField(item.field)) && (
+                          <div className="col-span-full mt-1 flex items-center gap-3 border-t border-gray-100 pt-4 dark:border-gray-800">
+                            <span className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-gray-400">{t("detailSchedule")}</p>
+                            <span className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+                          </div>
+                        )}
+                        <label className={`flex min-w-0 flex-col gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 ${getDetailFieldSpanClass(group.key, field)}`}>
+                          <span className="truncate">{labelKey ? t(labelKey) : localizeSheetField(field, t)}</span>
+                          {isDateDetailField(field) ? (
+                            <DateFieldInput
+                              label={field}
+                              value={detailForm[field]}
+                              disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field)}
+                              onChange={(value) => setDetailForm((current) => ({ ...current, [field]: value }))}
+                            />
+                          ) : (
+                            <input
+                              type="text"
+                              value={detailForm[field] || ""}
+                              disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field)}
+                              onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))}
+                              className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-800 outline-none transition-colors focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
+                            />
+                          )}
+                        </label>
+                      </React.Fragment>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
             {canEditDetails && isDetailsEditing && (
