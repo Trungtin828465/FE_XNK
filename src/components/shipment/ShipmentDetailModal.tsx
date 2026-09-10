@@ -4,13 +4,15 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentsAndSaveStatus, editReturnItem, editSummary, fetchReturnItem, getArchivedDocuments, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentsAndSaveStatus, editReturnItem, editSummary, fetchReturnItem, getArchivedDocuments, launchCKLineTracking, launchEvergreenTracking, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useLanguage } from "@/context/LanguageContext";
+import { submitEvergreenTracking } from "@/utils/evergreenTracking";
+import { CK_LINE_CARRIER_CONFIG } from "@/utils/ckLineTracking";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 
@@ -158,6 +160,7 @@ const DOCUMENT_DISPLAY_ORDER = [
 type CarrierTrackingLink = {
   name: string;
   aliases: string[];
+  trackingType?: "BL" | "CONTAINER";
   requiresManualCode: boolean;
   usesBackendApi?: boolean;
   buildUrl: (trackingCode: string) => string;
@@ -232,11 +235,8 @@ const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
     buildUrl: (trackingCode) => buildBackendTrackingUrl("/api/tracking/yangming", trackingCode),
   },
   {
-    name: "CKLINE",
-    aliases: ["ckline", "ck line", "ckl"],
-    requiresManualCode: false,
-    usesBackendApi: true,
-    buildUrl: (trackingCode) => buildBackendTrackingUrl("/api/tracking/ckline", trackingCode),
+    ...CK_LINE_CARRIER_CONFIG,
+    buildUrl: () => "https://es.ckline.co.kr/",
   },
   {
     name: "EVERGREEN",
@@ -658,6 +658,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isSendingEmail] = useState(false);
   const [emailSent] = useState(false);
   const [isOpeningTracking, setIsOpeningTracking] = useState(false);
+  const evergreenTrackingInProgress = React.useRef(false);
+  const ckLineTrackingInProgress = React.useRef(false);
   const [trackingFeedback, setTrackingFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -788,9 +790,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     : t("processing");
   const selectedMissingIds = selectedMissingDocIds;
   const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
-  // Tất cả hãng dùng chuỗi trước dấu phẩy trong cột BL NO.
-  const trackingCode = shipment.bill?.split(",")[0].trim() || "";
-  const carrierTrackingUrl = carrierTrackingLink && trackingCode
+  const isEvergreenTracking = carrierTrackingLink?.name === "EVERGREEN";
+  const isCkLineTracking = carrierTrackingLink?.name === CK_LINE_CARRIER_CONFIG.name;
+  const evergreenContainerNo = overviewInfo.container?.split(",")[0].trim() || "";
+  const trackingCode = isEvergreenTracking
+    ? evergreenContainerNo
+    : shipment.bill?.split(",")[0].trim() || "";
+  const carrierTrackingUrl = carrierTrackingLink && trackingCode && !isEvergreenTracking && !isCkLineTracking
     ? carrierTrackingLink.buildUrl(trackingCode)
     : null;
   const currentOcrDocumentType = ocrUploadDocId ? getOcrDocumentType(ocrUploadDocId) : null;
@@ -830,6 +836,39 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           : `Không thể mở tracking ${carrierTrackingLink.name}.`,
       });
     } finally {
+      setIsOpeningTracking(false);
+    }
+  };
+
+  const handleEvergreenTracking = async () => {
+    if (!isEvergreenTracking || !evergreenContainerNo || evergreenTrackingInProgress.current) return;
+
+    try {
+      await submitEvergreenTracking(evergreenContainerNo, {
+        requestLaunch: launchEvergreenTracking,
+        showError: (message) => notify(message, "error"),
+        onStarted: () => {
+          evergreenTrackingInProgress.current = true;
+          setIsOpeningTracking(true);
+        },
+      });
+    } finally {
+      evergreenTrackingInProgress.current = false;
+      setIsOpeningTracking(false);
+    }
+  };
+
+  const handleCkLineTracking = async () => {
+    if (!isCkLineTracking || !trackingCode || ckLineTrackingInProgress.current) return;
+    ckLineTrackingInProgress.current = true;
+    setIsOpeningTracking(true);
+    try {
+      const result = await launchCKLineTracking(trackingCode);
+      notify(result.message || t("ckLineTrackingOpened"), "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : t("ckLineTrackingError"), "error");
+    } finally {
+      ckLineTrackingInProgress.current = false;
       setIsOpeningTracking(false);
     }
   };
@@ -1289,14 +1328,62 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 </svg>
               </div>
 
-              {carrierTrackingLink && carrierTrackingUrl ? (
+              {carrierTrackingLink && (isEvergreenTracking || isCkLineTracking || carrierTrackingUrl) ? (
                 <>
                   {carrierTrackingLink.requiresManualCode && (
                     <p className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
                       {t("copyTrackingCode")}
                     </p>
                   )}
-                  {carrierTrackingLink.usesBackendApi ? (
+                  {isEvergreenTracking ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleEvergreenTracking()}
+                        disabled={!evergreenContainerNo || isOpeningTracking}
+                        className="mt-4 flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-500 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/30 sm:px-4"
+                      >
+                        <span className="min-w-0 break-words text-left leading-5">
+                          {isOpeningTracking ? t("openingEvergreenTracking") : t("trackEvergreen")}
+                        </span>
+                        {isOpeningTracking ? (
+                          <svg className="flex-shrink-0 animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="23 4 23 10 17 10" />
+                            <polyline points="1 20 1 14 7 14" />
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                          </svg>
+                        ) : (
+                          <svg className="flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                            <polyline points="15 3 21 3 21 9" />
+                            <line x1="10" y1="14" x2="21" y2="3" />
+                          </svg>
+                        )}
+                      </button>
+                      {!evergreenContainerNo && (
+                        <p className="mt-2 text-xs text-warning-600 dark:text-warning-400">{t("addTrackingCode")}</p>
+                      )}
+                    </>
+                  ) : isCkLineTracking ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleCkLineTracking()}
+                        disabled={!trackingCode || isOpeningTracking}
+                        className="mt-4 flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-500 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/30 sm:px-4"
+                      >
+                        <span className="min-w-0 break-words text-left leading-5">
+                          {isOpeningTracking ? t("openingCkLineTracking") : t("trackCkLine")}
+                        </span>
+                        <svg className="flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                          <polyline points="15 3 21 3 21 9" />
+                          <line x1="10" y1="14" x2="21" y2="3" />
+                        </svg>
+                      </button>
+                      {!trackingCode && <p className="mt-2 text-xs font-medium text-warning-600 dark:text-warning-400">{t("ckLineMissingBill")}</p>}
+                    </>
+                  ) : carrierTrackingLink.usesBackendApi ? (
                     <button
                       type="button"
                       onClick={handleOpenCarrierTracking}
@@ -1324,7 +1411,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     </button>
                   ) : (
                     <a
-                      href={carrierTrackingUrl}
+                      href={carrierTrackingUrl || "#"}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={`${carrierTrackingLink.requiresManualCode ? "mt-2" : "mt-4"} flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-500 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 dark:border-brand-500/30 sm:px-4`}
@@ -1356,7 +1443,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     {carrierTrackingLink ? t("trackingUnavailable") : t("carrierTrackingUnavailable")}
                   </p>
                   <p className="mt-1 text-xs text-warning-600 dark:text-warning-400">
-                    {carrierTrackingLink ? t("addTrackingCode") : t("noCarrierLink")}
+                    {carrierTrackingLink
+                      ? carrierTrackingLink.trackingType === "BL"
+                        ? t("ckLineMissingBill")
+                        : t("addTrackingCode")
+                      : t("noCarrierLink")}
                   </p>
                 </div>
               )}

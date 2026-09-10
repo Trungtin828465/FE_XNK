@@ -8,6 +8,9 @@ import type {
   ShipmentDocument,
   ShipmentMetricsSummary,
 } from "@/types/shipment";
+import { getStoredUser } from "@/services/authApi";
+import type { EvergreenTrackingLaunchResponse } from "@/utils/evergreenTracking";
+import { buildCKLineTrackingPayload, type CKLineTrackingLaunchResponse } from "@/utils/ckLineTracking";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
@@ -303,6 +306,30 @@ export async function uploadDocument(payload: UploadDocumentPayload): Promise<Dr
     window.dispatchEvent(new CustomEvent(NOTIFICATIONS_SYNC_EVENT, { detail: result.sync }));
   }
   return result;
+}
+
+export function launchEvergreenTracking(containerNo: string): Promise<EvergreenTrackingLaunchResponse> {
+  const token = getStoredUser()?.token?.trim();
+  return requestJson<EvergreenTrackingLaunchResponse>("tracking/evergreen/launch", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ containerNo }),
+  });
+}
+
+export function launchCKLineTracking(code: string): Promise<CKLineTrackingLaunchResponse> {
+  const token = getStoredUser()?.token?.trim();
+  return requestJson<CKLineTrackingLaunchResponse>("tracking/ckline", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(buildCKLineTrackingPayload(code)),
+  });
 }
 
 export interface EditSummaryPayload { action: "editSummary"; orderCode: string; data: Record<string, string | number>; }
