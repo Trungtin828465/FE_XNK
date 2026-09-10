@@ -11,6 +11,7 @@ import type {
 import { getStoredUser } from "@/services/authApi";
 import type { EvergreenTrackingLaunchResponse } from "@/utils/evergreenTracking";
 import { buildCKLineTrackingPayload, type CKLineTrackingLaunchResponse } from "@/utils/ckLineTracking";
+import type { CmaTrackingLaunchResponse } from "@/utils/cmaTracking";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
@@ -329,6 +330,18 @@ export function launchCKLineTracking(code: string): Promise<CKLineTrackingLaunch
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(buildCKLineTrackingPayload(code)),
+  });
+}
+
+export function launchCmaTracking(reference: string): Promise<CmaTrackingLaunchResponse> {
+  const token = getStoredUser()?.token?.trim();
+  return requestJson<CmaTrackingLaunchResponse>("tracking/cma", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ reference: reference.trim() }),
   });
 }
 

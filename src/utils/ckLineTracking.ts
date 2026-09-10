@@ -11,7 +11,7 @@ export interface CKLineTrackingLaunchResponse {
   message?: string;
   carrier?: string;
   code?: string;
-  [key: string]: unknown;
+  bl?: string;
 }
 
 export function isCKLineCarrier(carrier?: string): boolean {
