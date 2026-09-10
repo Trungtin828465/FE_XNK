@@ -4,7 +4,7 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentsAndSaveStatus, editReturnItem, editSummary, fetchReturnItem, getArchivedDocuments, launchCKLineTracking, launchCmaTracking, launchEvergreenTracking, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentsAndSaveStatus, editReturnItem, editSummary, fetchReturnItem, getArchivedDocuments, launchCKLineTracking, launchEvergreenTracking, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
@@ -13,7 +13,6 @@ import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { submitEvergreenTracking } from "@/utils/evergreenTracking";
 import { CK_LINE_CARRIER_CONFIG } from "@/utils/ckLineTracking";
-import { submitCmaTracking } from "@/utils/cmaTracking";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 
@@ -182,6 +181,13 @@ function buildMscTrackingUrl(trackingCode: string): string {
   return `https://www.msc.com/en/track-a-shipment?params=${encodeURIComponent(params)}`;
 }
 
+function buildCmaTrackingUrl(reference: string): string {
+  const normalizedReference = reference.trim().toUpperCase();
+  const searchBy = /^[A-Z]{4}\d{7}$/.test(normalizedReference) ? "Container" : "Booking";
+  const params = new URLSearchParams({ Reference: normalizedReference, SearchBy: searchBy });
+  return `https://www.cma-cgm.com/ebusiness/tracking?${params.toString()}`;
+}
+
 // Chỉ hiển thị link cho các hãng đã được cấu hình. Có thể bổ sung URL tại đây
 // khi có thêm danh sách tracking chính thức từ các hãng tàu.
 const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
@@ -207,7 +213,8 @@ const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
     name: "CMA CGM",
     aliases: ["cma", "cma cgm"],
     requiresManualCode: false,
-    usesBackendApi: true,
+    usesBackendApi: false,
+    buildUrl: buildCmaTrackingUrl,
   },
   {
     name: "COSCO",
@@ -660,7 +667,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isOpeningTracking, setIsOpeningTracking] = useState(false);
   const evergreenTrackingInProgress = React.useRef(false);
   const ckLineTrackingInProgress = React.useRef(false);
-  const cmaTrackingInProgress = React.useRef(false);
   const [trackingFeedback, setTrackingFeedback] = useState<{
     type: "success" | "error";
     message: string;
@@ -802,7 +808,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     : isCmaTracking
       ? billTrackingCode || containerTrackingCode
       : billTrackingCode;
-  const carrierTrackingUrl = carrierTrackingLink?.buildUrl && trackingCode && !isEvergreenTracking && !isCkLineTracking && !isCmaTracking
+  const carrierTrackingUrl = carrierTrackingLink?.buildUrl && trackingCode && !isEvergreenTracking && !isCkLineTracking
     ? carrierTrackingLink.buildUrl(trackingCode)
     : null;
   const currentOcrDocumentType = ocrUploadDocId ? getOcrDocumentType(ocrUploadDocId) : null;
@@ -875,23 +881,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       notify(error instanceof Error ? error.message : t("ckLineTrackingError"), "error");
     } finally {
       ckLineTrackingInProgress.current = false;
-      setIsOpeningTracking(false);
-    }
-  };
-
-  const handleCmaTracking = async () => {
-    if (!isCmaTracking || !trackingCode || cmaTrackingInProgress.current) return;
-    try {
-      await submitCmaTracking(trackingCode, {
-        requestLaunch: launchCmaTracking,
-        showError: (message) => notify(message, "error"),
-        onStarted: () => {
-          cmaTrackingInProgress.current = true;
-          setIsOpeningTracking(true);
-        },
-      });
-    } finally {
-      cmaTrackingInProgress.current = false;
       setIsOpeningTracking(false);
     }
   };
@@ -1351,7 +1340,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 </svg>
               </div>
 
-              {carrierTrackingLink && (isEvergreenTracking || isCkLineTracking || isCmaTracking || carrierTrackingUrl) ? (
+              {carrierTrackingLink && (isEvergreenTracking || isCkLineTracking || carrierTrackingUrl) ? (
                 <>
                   {carrierTrackingLink.requiresManualCode && (
                     <p className="mt-4 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">
@@ -1405,25 +1394,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         </svg>
                       </button>
                       {!trackingCode && <p className="mt-2 text-xs font-medium text-warning-600 dark:text-warning-400">{t("ckLineMissingBill")}</p>}
-                    </>
-                  ) : isCmaTracking ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => void handleCmaTracking()}
-                        disabled={!trackingCode || isOpeningTracking}
-                        className="mt-4 flex w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-500 px-3 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/30 sm:px-4"
-                      >
-                        <span className="min-w-0 break-words text-left leading-5">
-                          {isOpeningTracking ? t("openingCmaTracking") : t("trackCma")}
-                        </span>
-                        <svg className="flex-shrink-0" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                          <polyline points="15 3 21 3 21 9" />
-                          <line x1="10" y1="14" x2="21" y2="3" />
-                        </svg>
-                      </button>
-                      {!trackingCode && <p className="mt-2 text-xs font-medium text-warning-600 dark:text-warning-400">{t("cmaMissingReference")}</p>}
                     </>
                   ) : carrierTrackingLink.usesBackendApi ? (
                     <button
