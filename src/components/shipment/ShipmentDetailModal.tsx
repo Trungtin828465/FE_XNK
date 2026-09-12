@@ -388,11 +388,13 @@ function CalendarIcon() {
 }
 
 function DateFieldInput({
+  id,
   value,
   disabled,
   label,
   onChange,
 }: {
+  id?: string;
   value?: string;
   disabled: boolean;
   label: string;
@@ -409,6 +411,7 @@ function DateFieldInput({
   return (
     <div className="relative">
       <input
+        id={id}
         ref={inputRef}
         type="date"
         value={toDateInputValue(value)}
@@ -1956,7 +1959,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     </div>
                   </div>
                   <div className={`grid gap-x-4 gap-y-4 p-4 sm:p-5 ${getDetailGroupGridClass(group.key)}`}>
-                    {group.fields.map(({ field, labelKey }, fieldIndex) => (
+                    {group.fields.map(({ field, labelKey }, fieldIndex) => {
+                      const inputId = `shipment-detail-${group.key}-${normalizeSheetField(field)}`;
+                      return (
                       <React.Fragment key={field}>
                         {group.key === "importExport" && isDateDetailField(field) && !group.fields.slice(0, fieldIndex).some((item) => isDateDetailField(item.field)) && (
                           <div className="col-span-full mt-1 flex items-center gap-3 border-t border-gray-100 pt-4 dark:border-gray-800">
@@ -1965,10 +1970,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                             <span className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
                           </div>
                         )}
-                        <label className={`flex min-w-0 flex-col gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300 ${getDetailFieldSpanClass(group.key, field)}`}>
-                          <span className="truncate">{labelKey ? t(labelKey) : localizeSheetField(field, t)}</span>
+                        <div className={`flex min-w-0 flex-col gap-1.5 ${getDetailFieldSpanClass(group.key, field)}`}>
+                          <label htmlFor={inputId} className="truncate text-xs font-semibold text-gray-600 dark:text-gray-300">
+                            {labelKey ? t(labelKey) : localizeSheetField(field, t)}
+                          </label>
                           {isDateDetailField(field) ? (
                             <DateFieldInput
+                              id={inputId}
                               label={field}
                               value={detailForm[field]}
                               disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field)}
@@ -1976,6 +1984,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                             />
                           ) : (
                             <input
+                              id={inputId}
                               type="text"
                               value={detailForm[field] || ""}
                               disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field)}
@@ -1983,9 +1992,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-800 outline-none transition-colors focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
                             />
                           )}
-                        </label>
+                        </div>
                       </React.Fragment>
-                    ))}
+                      );
+                    })}
                   </div>
                 </section>
               ))}
