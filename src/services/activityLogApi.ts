@@ -1,4 +1,6 @@
 import type { AuthUser } from "@/types/auth";
+import { getStoredUser } from "@/services/authApi";
+import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 
@@ -56,19 +58,23 @@ function normalizeLog(row: unknown, index: number): ActivityLog | null {
 }
 
 export async function getActivityLogs(): Promise<ActivityLog[]> {
-  const response = await fetch(`${API_BASE}/api/auth/activity-logs`, {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    cache: "no-store",
-  });
-
-  const result: unknown = await response.json().catch(() => null);
-  if (!response.ok) {
-    const message = isRecord(result)
-      ? String(result.message ?? result.error ?? "").trim()
-      : "";
-    throw new Error(message || `Không thể tải nhật ký hoạt động (${response.status})`);
+  const apiPath = "/api/auth/activity-logs";
+  const token = getStoredUser()?.token?.trim();
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${apiPath}`, {
+      method: "GET",
+      headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      cache: "no-store",
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw createNetworkApiError("Nhật ký", "GET", apiPath, error);
+    throw error;
   }
+
+  const { data: result, nonJsonPreview } = await parseApiResponse(response);
+  if (!response.ok) throw createHttpApiError("Nhật ký", "GET", apiPath, response, result, nonJsonPreview);
+  if (result === null) throw createInvalidResponseError("Nhật ký", "GET", apiPath, nonJsonPreview);
 
   return findLogRows(result)
     .map(normalizeLog)
@@ -86,23 +92,30 @@ export async function createActivityLog(user: AuthUser | null, payload: Activity
     return;
   }
 
-  const response = await fetch(`${API_BASE}/api/auth/activity-logs`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      userId: user.id,
-      action: payload.action.slice(0, 255),
-      location: (payload.location || "").slice(0, 255),
-      detail: (payload.detail || "").slice(0, 255),
-    }),
-  });
-
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({})) as { message?: string; error?: string };
-    throw new Error(result.message || result.error || `Không thể ghi activity log (${response.status})`);
+  const apiPath = "/api/auth/activity-logs";
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${apiPath}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(user.token ? { Authorization: `Bearer ${user.token}` } : {}),
+      },
+      body: JSON.stringify({
+        userId: user.id,
+        action: payload.action.slice(0, 255),
+        location: (payload.location || "").slice(0, 255),
+        detail: (payload.detail || "").slice(0, 255),
+      }),
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw createNetworkApiError("Nhật ký", "POST", apiPath, error);
+    throw error;
   }
+
+  const { data: result, nonJsonPreview } = await parseApiResponse(response);
+  if (!response.ok) throw createHttpApiError("Nhật ký", "POST", apiPath, response, result, nonJsonPreview);
+  if (result === null) throw createInvalidResponseError("Nhật ký", "POST", apiPath, nonJsonPreview);
 }
 
 /** Ghi log nền để lỗi log không làm người dùng lặp lại một nghiệp vụ đã thành công. */

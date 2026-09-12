@@ -2,10 +2,12 @@
 // Shipment Domain Types
 // ============================================================
 
+import type { PostgresShipmentRelations } from "@/types/postgresShipment";
+
 export type ShipmentStatus =
   | "shipping"      // Đang vận chuyển (chưa đến ETA)
   | "completed"     // Hoàn thành (đã qua ETA + đủ giấy tờ)
-  | "missing_docs"  // Thiếu chứng từ (status = 0 từ getSheetTotal)
+  | "missing_docs"  // Thiếu chứng từ theo bảng chung_tu_drive
   | "cancelled";    // Đơn đã hủy (giữ nguyên dữ liệu, chỉ đổi trạng thái)
 
 export type DocumentStatus = "ok" | "missing" | "pending" | "expired";
@@ -76,7 +78,6 @@ export interface Shipment {
   orderCode: string;           // Số HĐ
   shipName: string;            // Tên hàng
   supplier: string;            // KHÁCH HÀNG (người mua)
-  factory?: string;            // NHÀ MÁY (nhà sản xuất / xuất xứ)
   factoryCode?: string;        // MÃ NHÀ MÁY
   origin?: string;             // XUẤT XỨ
   vessel?: string;             // Hãng tàu
@@ -84,31 +85,24 @@ export interface Shipment {
   etd?: string;                // ETD
   eta?: string;                // ETA
   ata?: string;                // Actual Time of Arrival (nếu có)
-  telex?: string;              // Telex
   port?: string;               // Cảng
   contCount?: number;          // Số cont
   status: ShipmentStatus;
-  soldAtSea?: boolean;         // Có trong sheet đơn hàng đã bán (getSheetSell)
-  docStatus: number;           // 0 = thiếu, 1 = đủ (từ getSheetTotal)
-  traCong?: string;           // Cột TRA_CONG từ sheet summary
+  docStatus: number;           // 0 = thiếu, 1 = đủ theo dữ liệu chứng từ Drive
   flowStageKey?: "buying" | "shipping" | "arrived" | "declared" | "fifteenb" | "customs" | "delivered";
   flowStageLabel?: string;
   flowStageLate?: boolean;
   totalDocs: number;           // requist_docs
   receivedDocs: number;        // total_docs (đã có)
   missingDocs: string;         // mis_docs (danh sách tên giấy tờ thiếu)
-  driveUrl?: string;           // folder url từ getSheetTotal
-  timeUpdate?: string;         // time_update từ getSheetTotal
-  // Financial fields
-  thuong?: number;             // Thùng
-  trlg?: number;               // Trlg
-  giaB?: number;               // Giá bán($)
-  thanhTien?: number;          // Thành tiền ($)
+  timeUpdate?: string;         // date_time từ bảng chung_tu_drive
   documents?: ShipmentDocument[];
   timeline?: ShipmentTimeline[];
   statusHistory?: ShipmentStatusHistory[];
-  /** Các cột nguyên bản của tab Summary, dùng cho tab Chi tiết và chỉnh sửa. */
+  /** Dữ liệu tổng hợp từ các quan hệ PostgreSQL, dùng cho tab Chi tiết và OCR. */
   summaryFields?: Record<string, string>;
+  /** Quan hệ dữ liệu nghiệp vụ từ PostgreSQL; file vật lý được lưu trên Drive. */
+  database?: PostgresShipmentRelations;
   updatedAt: string;
   createdAt: string;
 }
@@ -134,85 +128,23 @@ export interface ShipmentFilter {
 export interface DriveDataResponse {
   success: boolean;
   message?: string;
+  fileUrl?: string;
+  fileName?: string;
+  fileId?: string;
   updatedAt?: string;
-  sync?: {
-    sheetTotal?: unknown;
-    notifications?: unknown;
-    errors?: unknown[];
-  };
-}
-
-export interface SheetDataResponse {
-  shipments: Shipment[];
-  lastUpdated: string;
-  updatedBy?: string;
-}
-
-export interface SystemUser {
-  id: string;
-  name: string;
-  email: string;
-  avatar?: string;
-  lastSeen: string;
-}
-
-// Raw API types from backend
-export interface SheetTotalRow {
-  foldername?: string | number;
-  "folder url"?: string;
-  Order_code?: string | number;
-  order_code?: string | number;
-  PI?: string;
-  PKL?: string;
-  INV?: string;
-  BL?: string;
-  CO?: string;
-  HC?: string;
-  TRA_CONG?: string;
-  requist_docs?: number;
-  total_docs?: number;
-  mis_docs?: string;
-  status?: number;
-  time_update?: string;
-  [key: string]: string | number | undefined;
-}
-
-export interface SheetSummaryRow {
-  STT: string | number;
-  "Số HĐ": string | number;
-  "KHÁCH HÀNG": string;
-  "Ngày HĐ": string;
-  INV: string | number;
-  "Ngày IV": string;
-  GP: string;
-  "Tên hàng": string;
-  "NHÀ MÁY": string;
-  "MÃ NHÀ MÁY": string;
-  "XUẤT XỨ": string;
-  Cont: number;
-  "Cảng": string;
-  "BL NO.": string;
-  "Hãng tàu": string;
-  ETD: string;
-  ETA: string;
-  ATA?: string;
-  "LỆNH GIAO HÀNG": string;
-  TRA_CONG?: string;
-  Thùng: number;
-  Trlg: number;
-  "Giá bán($)": number;
-  "Thành tiền ($)": number;
-  [key: string]: unknown;
 }
 
 export interface ReturnItem {
+  idVanChuyen: string;
+  idBlContainer: string;
   ngay: string;
   soCont: string;
   soHd: string;
   nhaXe: string;
-  xeTai: string;
-  noiLayHang: string;
-  noiTraHang: string;
-  noiHaRong: string;
-  nhapXuat: string;
+  tenTaiXe: string;
+  bienSoXe: string;
+  noiDi: string;
+  idKho: string;
+  tenKho: string;
+  ghiChu: string;
 }

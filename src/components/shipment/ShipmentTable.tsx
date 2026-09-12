@@ -429,9 +429,6 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
                         >
                           {shipment.shipName}
                         </p>
-                        {shipment.factory && (
-                          <p className="text-[10px] text-gray-400 truncate max-w-[200px]">{shipment.factory}{shipment.origin ? ` • ${shipment.origin}` : ""}</p>
-                        )}
                       </div>
                     </td>
 
@@ -490,11 +487,6 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
                           <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sc.dot}`} />
                           <span className="truncate">{statusLabel}</span>
                         </span>
-                        {shipment.soldAtSea && (
-                          <span className="text-[10px] ml-3 font-semibold text-success-600 dark:text-success-400">
-                            Đã bán trên biển
-                          </span>
-                        )}
                       </div>
                     </td>
 

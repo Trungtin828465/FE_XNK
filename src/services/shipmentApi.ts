@@ -1,16 +1,24 @@
 import type {
   ArchivedDocumentsResponse,
   DriveDataResponse,
-  SheetSummaryRow,
-  SheetTotalRow,
   ReturnItem,
   Shipment,
   ShipmentDocument,
   ShipmentMetricsSummary,
 } from "@/types/shipment";
 import { getStoredUser } from "@/services/authApi";
+import {
+  fetchDriveDocumentRows,
+  fetchNotificationRows,
+  fetchPostgresReturnItem,
+  fetchPostgresShipmentListSnapshot,
+  databaseEndpoints,
+  updateDatabaseRow,
+} from "@/services/postgresShipmentApi";
 import type { EvergreenTrackingLaunchResponse } from "@/utils/evergreenTracking";
 import { buildCKLineTrackingPayload, type CKLineTrackingLaunchResponse } from "@/utils/ckLineTracking";
+import type { DriveDocumentRecord, NotificationRecord, PostgresShipmentRelations, PostgresShipmentSnapshot, PurchaseRecord } from "@/types/postgresShipment";
+import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
@@ -41,37 +49,12 @@ const FLOW_STAGE_LABELS: Record<NonNullable<Shipment["flowStageKey"]>, string> =
 
 export const SUMMARY_FIELDS = [
   "Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng",
-  "INV", "Ngày INV", "Số hộp", "Trọng lượng", "Trọng lượng cả bì", "BL NO.",
+  "INV", "Ngày INV", "Số hộp", "Trọng lượng", "BL NO.",
   "Số Container", "Hãng tàu", "Cảng đến", "ETD", "ETA", "ATA",
 ] as const;
 
 function endpoint(path: string): string {
   return `${API_BASE}/api/${path.replace(/^\//, "")}`;
-}
-
-function normalizeHeader(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "");
-}
-
-function repairMojibake(value: string): string {
-  if (!/[ÃÂ]/.test(value)) return value;
-  try {
-    return new TextDecoder("utf-8").decode(Uint8Array.from(value, (char) => char.charCodeAt(0)));
-  } catch {
-    return value;
-  }
-}
-
-function getSheetValue(row: Record<string, unknown>, field: string): string {
-  const direct = row[field];
-  if (direct != null && String(direct).trim()) return String(direct).trim();
-  const wanted = normalizeHeader(field);
-  const match = Object.entries(row).find(([key]) => normalizeHeader(repairMojibake(key)) === wanted);
-  return match?.[1] == null ? "" : String(match[1]).trim();
 }
 
 function parseDate(value: unknown): string | undefined {
@@ -96,179 +79,243 @@ function parseDate(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString().split("T")[0];
 }
 
-function parseNumber(value: string): number | undefined {
-  const cleaned = value.replace(/[^\d.,-]/g, "");
-  if (!cleaned) return undefined;
-  const normalized = cleaned.includes(",") && cleaned.includes(".")
-    ? cleaned.replace(/\./g, "").replace(",", ".")
-    : cleaned.replace(",", ".");
-  const number = Number(normalized);
-  return Number.isFinite(number) ? number : undefined;
-}
+const DOCUMENT_FIELD_MAP: Record<(typeof DOCUMENT_CODES)[number], keyof DriveDocumentRecord> = {
+  PI: "pi", INV: "inv", PKL: "pkl", BL: "bl", CO: "co", HC: "hc",
+  DON_KD: "don_kd", BB_LM: "bb_lm", PHI_TK: "phi_tk", THUE_NK: "thue_nk",
+  TK: "tk", "15B": "15b", QDTQ: "qdtq", MV: "mv", TRA_CONG: "tra_cong",
+};
 
-function buildDocuments(total: SheetTotalRow | undefined): ShipmentDocument[] {
+function buildDocuments(total: DriveDocumentRecord | undefined): ShipmentDocument[] {
   return DOCUMENT_CODES.map((code) => {
-    const url = typeof total?.[code] === "string" ? total[code].trim() : "";
+    const rawUrl = total?.[DOCUMENT_FIELD_MAP[code]];
+    const url = typeof rawUrl === "string" ? rawUrl.trim() : "";
+    const passed = url.toUpperCase() === "PASS";
     return {
       id: code,
       name: `Chứng từ ${code}`,
       type: "pdf",
       status: url ? "ok" : "missing",
-      url: url || undefined,
-      fileId: url || undefined,
-      note: url ? undefined : "Chưa có URL trong getSheetTotal",
+      url: passed ? undefined : url || undefined,
+      fileId: passed ? undefined : url || undefined,
+      note: passed ? "Chứng từ đã được PASS" : url ? undefined : "Chưa có URL trong PostgreSQL",
     };
   });
 }
 
-function mapShipment(row: SheetSummaryRow, total: SheetTotalRow | undefined, index: number): Shipment {
-  const orderCode = getSheetValue(row, "Số HĐ");
-  const documents = buildDocuments(total);
-  const receivedDocs = documents.filter((document) => document.status === "ok").length;
-  const totalDocs = documents.length;
-  // Ưu tiên số lượng URL thực tế: có trường hợp sheet Total chưa kịp cập nhật
-  // cột status nhưng toàn bộ 15 chứng từ đã tồn tại.
-  const completeByDocuments = receivedDocs === totalDocs && totalDocs > 0;
-  const docStatus = completeByDocuments ? 1 : Number(total?.status ?? 0);
-  const statusValue = getSheetValue(row, "Trạng thái").trim().toLowerCase();
-  const isCancelled = ["hủy", "huy", "đã hủy", "da huy", "cancelled", "canceled"].includes(statusValue);
-  const completed = !isCancelled && completeByDocuments;
-  const eta = parseDate(getSheetValue(row, "ETA"));
-  const ata = parseDate(getSheetValue(row, "ATA"));
-  const flowStageKey = completed
-    ? "delivered"
-    : FLOW_DOCUMENT_GROUPS.find((group) => group.docs.some((code) => !documents.some((document) => document.id === code && document.status === "ok")))?.key || "customs";
-  // Giữ toàn bộ các cột thực tế mà backend trả về, không giới hạn ở danh sách
-  // cố định để các cột mới trong sheet cũng xuất hiện trong tab Chi tiết.
-  const summaryFields = Object.fromEntries(
-    Object.entries(row).map(([field, value]) => [
-      repairMojibake(field).trim(),
-      value == null ? "" : String(value).trim(),
-    ]),
-  );
-
-  return {
-    id: `SH-${orderCode}-${index}`,
-    orderCode,
-    shipName: getSheetValue(row, "Tên hàng"),
-    supplier: getSheetValue(row, "Nhà cung cấp"),
-    origin: getSheetValue(row, "XUẤT XỨ") || undefined,
-    vessel: getSheetValue(row, "Hãng tàu") || undefined,
-    bill: getSheetValue(row, "BL NO.") || undefined,
-    etd: parseDate(getSheetValue(row, "ETD")),
-    eta,
-    ata,
-    port: getSheetValue(row, "Cảng đến") || undefined,
-    contCount: undefined,
-    status: isCancelled ? "cancelled" : completed ? "completed" : receivedDocs === 0 ? "missing_docs" : "shipping",
-    docStatus,
-    totalDocs,
-    receivedDocs,
-    missingDocs: documents.filter((document) => document.status !== "ok").map((document) => document.id).join(", "),
-    driveUrl: typeof total?.["folder url"] === "string" ? total["folder url"] : undefined,
-    timeUpdate: total?.time_update,
-    documents,
-    thuong: parseNumber(getSheetValue(row, "Số hộp")),
-    trlg: parseNumber(getSheetValue(row, "Trọng lượng")),
-    giaB: parseNumber(getSheetValue(row, "Giá tổng")),
-    flowStageKey,
-    flowStageLabel: completed ? "Hoàn thành" : FLOW_STAGE_LABELS[flowStageKey],
-    updatedAt: total?.time_update || new Date().toISOString(),
-    summaryFields,
-    createdAt: parseDate(getSheetValue(row, "Ngày HĐ PI")) || new Date().toISOString(),
-  };
-}
-
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getStoredUser()?.token?.trim();
+  const method = String(init?.method || "GET").toUpperCase();
+  const apiPath = `/api/${path.replace(/^\//, "")}`;
+  const scope = path.startsWith("ocr/")
+    ? "OCR"
+    : path.startsWith("tracking/")
+      ? "Tracking"
+      : ["uploadDocument", "getArchivedDocuments", "moveCompletedOrder"].some((name) => path.startsWith(name))
+        ? "Drive"
+        : "Backend";
   try {
-    const response = await fetch(endpoint(path), { cache: "no-store", ...init });
-    const json = await response.json().catch(() => ({})) as { success?: boolean; message?: string; error?: string; data?: T } & T;
-    if (!response.ok || json.success === false) {
-      throw new Error(json.message || json.error || `API lỗi ${response.status}`);
+    const response = await fetch(endpoint(path), {
+      cache: "no-store",
+      ...init,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...init?.headers,
+      },
+    });
+    const { data: parsed, nonJsonPreview } = await parseApiResponse(response);
+    const json = (parsed || {}) as { success?: boolean; message?: string; error?: string; data?: T } & T;
+    if (response.status === 401 && typeof window !== "undefined") {
+      window.dispatchEvent(new Event("xnk:auth-expired"));
     }
+    if (!response.ok || json.success === false) {
+      throw createHttpApiError(scope, method, apiPath, response, parsed, nonJsonPreview);
+    }
+    if (parsed === null) throw createInvalidResponseError(scope, method, apiPath, nonJsonPreview);
     return (json.data ?? json) as T;
   } catch (error) {
-    if (error instanceof TypeError) throw new Error("Không thể kết nối đến máy chủ");
+    if (error instanceof TypeError) throw createNetworkApiError(scope, method, apiPath, error);
     throw error;
   }
 }
 
-export async function fetchSheetTotalMap(): Promise<Map<string, SheetTotalRow>> {
-  const json = await requestJson<{ data?: SheetTotalRow[] } | SheetTotalRow[]>("getSheetTotal");
-  const rows = Array.isArray(json) ? json : json.data || [];
-  const map = new Map<string, SheetTotalRow>();
+export async function fetchDriveDocumentMap(): Promise<Map<string, DriveDocumentRecord>> {
+  const rows = await fetchDriveDocumentRows();
+  const map = new Map<string, DriveDocumentRecord>();
   rows.forEach((row) => {
-    const code = String(row.Order_code ?? row.order_code ?? row.foldername ?? "").trim();
-    if (code) map.set(code, row);
+    const code = String(row.order_code ?? "").trim();
+    if (code) map.set(code.toUpperCase(), row);
   });
   return map;
 }
 
-export async function fetchSheetSummaryRows(): Promise<{ rows: SheetSummaryRow[]; updatedAt: string }> {
-  const result = await requestJson<{ data?: SheetSummaryRow[]; updatedAt?: string } | SheetSummaryRow[]>("getSheetSummary");
-  if (Array.isArray(result)) {
-    return { rows: result, updatedAt: new Date().toISOString() };
-  }
-  return { rows: result.data || [], updatedAt: result.updatedAt || new Date().toISOString() };
-}
-
-export async function fetchShipments(): Promise<{ shipments: Shipment[]; lastUpdated: string; updatedBy: string }> {
-  const [{ rows, updatedAt }, totalMap] = await Promise.all([fetchSheetSummaryRows(), fetchSheetTotalMap()]);
-  const shipments = rows
-    .map((row, index) => mapShipment(row, totalMap.get(getSheetValue(row, "Số HĐ")), index))
-    .filter((shipment) => shipment.orderCode);
-  return { shipments, lastUpdated: updatedAt, updatedBy: "" };
-}
-
-function mapReturnItem(row: Record<string, unknown>): ReturnItem {
+export async function fetchShipments(): Promise<{ shipments: Shipment[]; lastUpdated: string; updatedBy: string; supplierOptions: string[]; carrierOptions: string[] }> {
+  const [database, totalMap] = await Promise.all([
+    fetchPostgresShipmentListSnapshot(),
+    fetchDriveDocumentMap(),
+  ]);
+  const lastUpdated = new Date().toISOString();
+  const shipments = database.purchases
+    .filter((purchase) => String(purchase.ma_hop_dong || "").trim())
+    .map((purchase, index) => mapPostgresShipment(
+      purchase,
+      database,
+      totalMap.get(purchase.ma_hop_dong.trim().toUpperCase()),
+      index,
+      lastUpdated,
+    ));
   return {
-    ngay: getSheetValue(row, "NGÀY"),
-    soCont: getSheetValue(row, "SỐ CONT"),
-    soHd: getSheetValue(row, "SỐ HĐ"),
-    nhaXe: getSheetValue(row, "NHÀ XE"),
-    xeTai: getSheetValue(row, "XE_TÀI"),
-    noiLayHang: getSheetValue(row, "NƠI LẤY HÀNG"),
-    noiTraHang: getSheetValue(row, "NƠI TRẢ HÀNG"),
-    noiHaRong: getSheetValue(row, "NƠI HẠ RỖNG"),
-    nhapXuat: getSheetValue(row, "NHẬP/XUẤT"),
+    shipments,
+    lastUpdated,
+    updatedBy: "PostgreSQL",
+    supplierOptions: [...new Set(database.suppliers.map((supplier) => supplier.ten_ncc).filter(Boolean))],
+    carrierOptions: [...new Set(database.carriers.map((carrier) => carrier.ten_hang_tau).filter(Boolean))],
+  };
+}
+
+function numberValue(value: string | number | null | undefined): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function mapPostgresShipment(
+  purchase: PurchaseRecord,
+  database: PostgresShipmentSnapshot,
+  total: DriveDocumentRecord | undefined,
+  index: number,
+  updatedAt: string,
+): Shipment {
+  const supplier = database.suppliers.find((item) => item.id_ncc === purchase.id_ncc);
+  const details = database.purchaseDetails
+    .filter((item) => item.ma_hop_dong === purchase.ma_hop_dong)
+    .map((detail) => ({
+      ...detail,
+      itemCodes: database.itemCodes.filter((item) => item.id_chi_tiet === detail.id_chi_tiet),
+    }));
+  const bills = database.bills
+    .filter((item) => item.ma_hop_dong === purchase.ma_hop_dong)
+    .map((bill) => ({
+      ...bill,
+      carrier: database.carriers.find((item) => item.id_hang_tau === bill.id_hang_tau),
+      containers: database.containers
+        .filter((item) => item.ma_bl === bill.ma_bl)
+        .map((container) => ({
+          ...container,
+          details: database.containerDetails.filter((item) => item.id_bl_container === container.id_bl_container),
+          transports: database.transports
+            .filter((item) => item.id_bl_container === container.id_bl_container)
+            .map((transport) => ({
+              ...transport,
+              warehouse: database.warehouses.find((item) => item.id_kho === transport.id_kho),
+            })),
+        })),
+    }));
+  const primaryBill = [...bills].sort((left, right) => String(left.eta || "9999-12-31").localeCompare(String(right.eta || "9999-12-31")))[0];
+  const containers = bills.flatMap((bill) => bill.containers);
+  const itemCodes = details.flatMap((detail) => detail.itemCodes);
+  const documents = buildDocuments(total);
+  const receivedDocs = documents.filter((document) => document.status === "ok").length;
+  const totalDocs = documents.length;
+  const completeByDocuments = receivedDocs === totalDocs && totalDocs > 0;
+  const flowStageKey = completeByDocuments
+    ? "delivered"
+    : FLOW_DOCUMENT_GROUPS.find((group) => group.docs.some((code) => !documents.some((document) => document.id === code && document.status === "ok")))?.key || "customs";
+  const totalPackages = details.reduce((sum, detail) => sum + numberValue(detail.so_kien), 0);
+  const totalWeight = details.reduce((sum, detail) => sum + numberValue(detail.net_weight), 0);
+  const totalPrice = details.reduce((sum, detail) => sum + numberValue(detail.tong_gia), 0);
+  const firstDetail = details[0];
+  const relations: PostgresShipmentRelations = { purchase, supplier, details, bills };
+  const orderCode = purchase.ma_hop_dong.trim();
+  const summaryFields: Record<string, string> = {
+    "Số HĐ": orderCode,
+    "Ngày HĐ PI": String(purchase.ngay_hop_dong || ""),
+    "Nhà cung cấp": supplier?.ten_ncc || purchase.id_ncc,
+    "XUẤT XỨ": supplier?.quoc_gia || "",
+    "INV": String(purchase.ma_inv || ""),
+    "Ngày INV": String(purchase.ngay_inv || ""),
+    "Tên hàng": firstDetail?.ten_hang || "",
+    "Giá tổng": totalPrice ? String(totalPrice) : "",
+    "Đơn giá": firstDetail?.don_gia == null ? "" : String(firstDetail.don_gia),
+    "Số hộp": totalPackages ? String(totalPackages) : "",
+    "Trọng lượng": totalWeight ? String(totalWeight) : "",
+    "BL NO.": primaryBill?.ma_bl || "",
+    "Mã Container": containers.map((item) => item.ma_container).filter(Boolean).join(", "),
+    "Số container": containers.length ? String(containers.length) : "",
+    "Hãng tàu": primaryBill?.carrier?.ten_hang_tau || primaryBill?.id_hang_tau || "",
+    "Cảng đi": primaryBill?.cang_di || "",
+    "Cảng đến": primaryBill?.cang_den || "",
+    "ETD": primaryBill?.etd || "",
+    "ETA": primaryBill?.eta || "",
+    "ATA": primaryBill?.ata || "",
+    "Item code": itemCodes.map((item) => item.item_code).filter(Boolean).join(", "),
+    "Mã nhà máy": itemCodes.map((item) => item.ma_nha_may).filter(Boolean).join(", "),
+    "Số tiền cọc": "",
+    "Số tiền thanh toán": "",
+    "Lệnh thả hàng": "",
+  };
+
+  return {
+    id: `PG-${purchase.ma_hop_dong}-${index}`,
+    orderCode,
+    shipName: details.map((item) => item.ten_hang).filter(Boolean).join(", "),
+    supplier: supplier?.ten_ncc || purchase.id_ncc,
+    origin: supplier?.quoc_gia || undefined,
+    factoryCode: itemCodes[0]?.ma_nha_may || undefined,
+    vessel: primaryBill?.carrier?.ten_hang_tau || undefined,
+    bill: primaryBill?.ma_bl || undefined,
+    etd: parseDate(primaryBill?.etd),
+    eta: parseDate(primaryBill?.eta),
+    ata: parseDate(primaryBill?.ata),
+    port: primaryBill?.cang_den || undefined,
+    contCount: containers.length,
+    status: purchase.is_deleted ? "cancelled" : completeByDocuments ? "completed" : receivedDocs === 0 ? "missing_docs" : "shipping",
+    docStatus: completeByDocuments ? 1 : Number(total?.status ?? 0),
+    totalDocs,
+    receivedDocs,
+    missingDocs: documents.filter((document) => document.status !== "ok").map((document) => document.id).join(", "),
+    timeUpdate: total?.date_time || undefined,
+    documents,
+    flowStageKey,
+    flowStageLabel: completeByDocuments ? "Hoàn thành" : FLOW_STAGE_LABELS[flowStageKey],
+    updatedAt,
+    createdAt: parseDate(purchase.ngay_hop_dong) || updatedAt,
+    summaryFields,
+    database: relations,
   };
 }
 
 export async function fetchReturnItem(orderCode: string): Promise<ReturnItem | null> {
-  const result = await requestJson<{ data?: Record<string, unknown>[] } | Record<string, unknown>[]>("getSheetReturnItem");
-  const rows = Array.isArray(result) ? result : result.data || [];
-  const wanted = orderCode.trim().toUpperCase();
-  const row = rows.find((item) => mapReturnItem(item).soHd.trim().toUpperCase() === wanted);
-  return row ? mapReturnItem(row) : null;
+  return fetchPostgresReturnItem(orderCode);
 }
 
-export interface EditReturnItemPayload {
-  action: "editReturnItem";
+export function getNotifications(): Promise<NotificationRecord[]> {
+  return fetchNotificationRows();
+}
+
+export async function markNotificationsRead(notificationIds: Array<string | number>): Promise<void> {
+  const uniqueIds = [...new Set(notificationIds.map(String).filter(Boolean))];
+  await Promise.all(uniqueIds.map((id) =>
+    updateDatabaseRow<NotificationRecord>(databaseEndpoints.notifications, id, { status: 1 }),
+  ));
+}
+
+export interface DocumentProgressResponse {
+  success: boolean;
   orderCode: string;
-  data: Record<string, string | number>;
+  currentStage: number;
+  currentStageKey: string;
+  currentStageLabel: string;
+  missingDocuments: string[];
+  exceededDocuments: string[];
+  isExceeded: boolean;
+  documents?: Record<string, unknown>;
+  notification?: Record<string, unknown> | null;
 }
 
-export function editReturnItem(payload: EditReturnItemPayload): Promise<DriveDataResponse> {
-  return requestJson<DriveDataResponse>("editReturnItem", {
+export function checkDocumentProgress(orderCode: string): Promise<DocumentProgressResponse> {
+  return requestJson<DocumentProgressResponse>("document-progress/check", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-}
-
-export interface SheetNotification {
-  name?: string; order_code?: string; type?: string; mss_docs?: string; status?: string | number; update_by?: string; date?: string;
-}
-
-export function getSheetNoti(): Promise<SheetNotification[]> {
-  return requestJson<SheetNotification[]>("getSheetNoti");
-}
-
-export function markAllNotificationsRead(): Promise<DriveDataResponse> {
-  return requestJson<DriveDataResponse>("markAllNotificationsRead", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "markAllNotificationsRead" }),
+    body: JSON.stringify({ orderCode }),
   });
 }
 
@@ -280,18 +327,6 @@ export function moveCompletedOrder(orderCode: string): Promise<DriveDataResponse
   return requestJson<DriveDataResponse>(`moveCompletedOrder?orderCode=${encodeURIComponent(orderCode)}`, { method: "POST" });
 }
 
-export function checkDocumentsAndSaveStatus(): Promise<DriveDataResponse> {
-  return requestJson<DriveDataResponse>("checkDocumentsAndSaveStatus", { method: "POST" });
-}
-
-export function updateNotifications(): Promise<DriveDataResponse> {
-  return requestJson<DriveDataResponse>("updateNotifications", { method: "POST" });
-}
-
-export function updateNotificationStatus(): Promise<DriveDataResponse> {
-  return requestJson<DriveDataResponse>("updateStatusNotification", { method: "PUT" });
-}
-
 export interface UploadDocumentPayload { action: "uploadDocument"; orderCode: string; documentCode: string; fileName: string; fileData: string; }
 export async function uploadDocument(payload: UploadDocumentPayload): Promise<DriveDataResponse> {
   const result = await requestJson<DriveDataResponse>("uploadDocument", {
@@ -299,11 +334,11 @@ export async function uploadDocument(payload: UploadDocumentPayload): Promise<Dr
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...payload, mimeType: "application/pdf" }),
   });
+  if (!result.fileUrl) throw new Error("[Upload chứng từ] Backend không trả fileUrl sau khi lưu file Drive");
 
-  // Upload đã thành công: đẩy dữ liệu sync sang notification dropdown ngay trong cùng phiên trình duyệt.
-  // Nếu backend không trả sync.notifications, dropdown sẽ tự fallback về GET /getSheetNoti.
+  // Upload đã thành công: yêu cầu dropdown tải lại bảng thong_bao PostgreSQL.
   if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent(NOTIFICATIONS_SYNC_EVENT, { detail: result.sync }));
+    window.dispatchEvent(new Event(NOTIFICATIONS_SYNC_EVENT));
   }
   return result;
 }
@@ -330,11 +365,6 @@ export function launchCKLineTracking(code: string): Promise<CKLineTrackingLaunch
     },
     body: JSON.stringify(buildCKLineTrackingPayload(code)),
   });
-}
-
-export interface EditSummaryPayload { action: "editSummary"; orderCode: string; data: Record<string, string | number>; }
-export function editSummary(payload: EditSummaryPayload): Promise<DriveDataResponse> {
-  return requestJson<DriveDataResponse>("editSummary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
 }
 
 export interface AnalyzeDocumentResponse { success: boolean; documentType: "PI" | "INV" | "PKL" | "BL"; fileName: string; data: Record<string, string>; _confidence?: number; ocrConfidence?: number; _reason?: string; models?: Record<string, string>; }

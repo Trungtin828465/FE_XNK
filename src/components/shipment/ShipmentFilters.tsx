@@ -2,47 +2,14 @@
 import React from "react";
 import type { ShipmentFilter, ShipmentFilterStatus } from "@/types/shipment";
 import { useLanguage } from "@/context/LanguageContext";
+import { DESTINATION_PORT_OPTIONS } from "@/config/shipmentCatalogOptions";
 
 interface ShipmentFiltersProps {
   filter: ShipmentFilter;
   onChange: (filter: ShipmentFilter) => void;
+  supplierOptions: string[];
+  carrierOptions: string[];
 }
-
-const SUPPLIER_OPTIONS = [
-  "Seara",
-  "Tonnies",
-  "Patel",
-  "Vetracom",
-  "Frival",
-  "Reixach",
-  "Fribin",
-  "Elpozo",
-  "Raiha",
-  "Agrobelogie",
-  "CCV",
-  "NWT",
-  "Profood",
-  "Corral",
-];
-
-const PORT_OPTIONS = ["HCM", "HP"];
-
-const VESSEL_OPTIONS = [
-  "YML",
-  "COSCO",
-  "CMA",
-  "HAPP",
-  "MAERSK",
-  "FESCO",
-  "EVER",
-  "PIL",
-  "ONE",
-  "MSC",
-  "OOCL",
-  "HMM",
-  "SINOKOR",
-  "CKLINE",
-];
 
 const inputCls =
   "w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500 dark:focus:ring-brand-500/20";
@@ -62,6 +29,8 @@ function CalendarIcon() {
 export default function ShipmentFilters({
   filter,
   onChange,
+  supplierOptions,
+  carrierOptions,
 }: ShipmentFiltersProps) {
   const { t } = useLanguage();
   const statusOptions: { value: ShipmentFilterStatus | "all"; label: string }[] = [
@@ -162,7 +131,7 @@ export default function ShipmentFilters({
           <label className={labelCls}>{t("supplier")}</label>
           <select id="filter-supplier" value={filter.supplier || ""} onChange={handleSupplier} className={inputCls}>
             <option value="">{t("all")}</option>
-            {SUPPLIER_OPTIONS.map(s => (
+            {supplierOptions.map(s => (
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
@@ -173,7 +142,7 @@ export default function ShipmentFilters({
           <label className={labelCls}>{t("port")}</label>
           <select id="filter-port" value={filter.port || ""} onChange={handlePort} className={inputCls}>
             <option value="">{t("all")}</option>
-            {PORT_OPTIONS.map(p => (
+            {DESTINATION_PORT_OPTIONS.map(p => (
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
@@ -184,7 +153,7 @@ export default function ShipmentFilters({
           <label className={labelCls}>{t("carrier")}</label>
           <select id="filter-vessel" value={filter.vessel || ""} onChange={handleVessel} className={inputCls}>
             <option value="">{t("all")}</option>
-            {VESSEL_OPTIONS.map(v => (
+            {carrierOptions.map(v => (
               <option key={v} value={v}>{v}</option>
             ))}
           </select>

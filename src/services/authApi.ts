@@ -1,11 +1,33 @@
 import type { AuthUser, LoginResponse } from "@/types/auth";
+import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 const AUTH_STORAGE_KEY = "dashboard_auth_user";
+export const AUTH_TOKEN_COOKIE_KEY = "xnk_auth_token";
+
+function storeTokenCookie(token: string): void {
+  if (typeof document === "undefined") return;
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${AUTH_TOKEN_COOKIE_KEY}=${encodeURIComponent(token)}; Path=/; SameSite=Lax; Max-Age=28800${secure}`;
+}
+
+function clearTokenCookie(): void {
+  if (typeof document === "undefined") return;
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${AUTH_TOKEN_COOKIE_KEY}=; Path=/; SameSite=Lax; Max-Age=0${secure}`;
+}
+
+function getTokenCookie(): string {
+  if (typeof document === "undefined") return "";
+  const prefix = `${AUTH_TOKEN_COOKIE_KEY}=`;
+  const value = document.cookie.split(";").map((item) => item.trim()).find((item) => item.startsWith(prefix));
+  return value ? decodeURIComponent(value.slice(prefix.length)) : "";
+}
 
 function storeUser(user: AuthUser): AuthUser {
   if (typeof window !== "undefined") {
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));
+    storeTokenCookie(user.token || "");
   }
   return user;
 }
@@ -56,13 +78,14 @@ function extractUser(json: LoginResponse, fallbackUsername: string): AuthUser {
   return {
     ...user,
     token: user.token || topLevelToken,
-    session: user.session || topLevelSession || topLevelToken,
+    session: user.session || topLevelSession,
   };
 }
 
 export async function login(username: string, password: string): Promise<AuthUser> {
+  const apiPath = "/api/auth/login";
   try {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
+    const res = await fetch(`${API_BASE}${apiPath}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -70,16 +93,22 @@ export async function login(username: string, password: string): Promise<AuthUse
       body: JSON.stringify({ username, password }),
     });
 
-    const json = (await res.json().catch(() => ({}))) as LoginResponse;
+    const { data, nonJsonPreview } = await parseApiResponse(res);
+    const json = (data || {}) as LoginResponse;
 
     if (!res.ok) {
-      throw new Error(json.message || "Login failed");
+      throw createHttpApiError("Đăng nhập", "POST", apiPath, res, data, nonJsonPreview);
     }
+    if (data === null) throw createInvalidResponseError("Đăng nhập", "POST", apiPath, nonJsonPreview);
 
-    return storeUser(extractUser(json, username));
+    const user = extractUser(json, username);
+    if (!user.token) {
+      throw new Error("Máy chủ chưa trả về token đăng nhập");
+    }
+    return storeUser(user);
   } catch (error) {
     if (error instanceof TypeError) {
-      throw new Error("Không thể kết nối đến máy chủ");
+      throw createNetworkApiError("Đăng nhập", "POST", apiPath, error);
     }
     throw error;
   }
@@ -98,11 +127,6 @@ export interface ManagedUser {
   name: string;
   role: string;
   session: string;
-}
-
-function getResponseMessage(payload: unknown): string {
-  if (!isRecord(payload)) return "";
-  return String(payload.message ?? payload.error ?? "").trim();
 }
 
 function findUserRows(payload: unknown): unknown[] {
@@ -130,41 +154,55 @@ function normalizeManagedUser(payload: unknown): ManagedUser | null {
 }
 
 async function authRequest(path: string, init: RequestInit): Promise<unknown> {
+  const token = getStoredUser()?.token?.trim();
+  const method = String(init.method || "GET").toUpperCase();
+  const apiPath = `/api/auth/${path}`;
   try {
-    const response = await fetch(`${API_BASE}/api/auth/${path}`, {
+    const response = await fetch(`${API_BASE}${apiPath}`, {
       ...init,
       headers: {
         Accept: "application/json",
         ...(init.body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...init.headers,
       },
       cache: "no-store",
     });
-    const result: unknown = await response.json().catch(() => null);
+    const { data: result, nonJsonPreview } = await parseApiResponse(response);
+    if (response.status === 401) clearStoredUser();
     if (!response.ok || (isRecord(result) && result.success === false)) {
-      throw new Error(getResponseMessage(result) || `Yêu cầu thất bại (${response.status})`);
+      throw createHttpApiError("Tài khoản", method, apiPath, response, result, nonJsonPreview);
     }
+    if (result === null) throw createInvalidResponseError("Tài khoản", method, apiPath, nonJsonPreview);
     return result;
   } catch (error) {
-    if (error instanceof TypeError) throw new Error("Không thể kết nối đến máy chủ");
+    if (error instanceof TypeError) throw createNetworkApiError("Tài khoản", method, apiPath, error);
     throw error;
   }
 }
 
 async function postAuthAction(path: string, body: Record<string, string>): Promise<AuthActionResponse> {
+  const token = getStoredUser()?.token?.trim();
+  const apiPath = `/api/auth/${path}`;
   try {
-    const response = await fetch(`${API_BASE}/api/auth/${path}`, {
+    const response = await fetch(`${API_BASE}${apiPath}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
       body: JSON.stringify(body),
     });
-    const result = await response.json().catch(() => ({})) as AuthActionResponse;
+    const { data, nonJsonPreview } = await parseApiResponse(response);
+    const result = (data || {}) as AuthActionResponse;
+    if (response.status === 401) clearStoredUser();
     if (!response.ok || result.success === false) {
-      throw new Error(result.message || result.error || `Yêu cầu thất bại (${response.status})`);
+      throw createHttpApiError("Tài khoản", "POST", apiPath, response, data, nonJsonPreview);
     }
+    if (data === null) throw createInvalidResponseError("Tài khoản", "POST", apiPath, nonJsonPreview);
     return result;
   } catch (error) {
-    if (error instanceof TypeError) throw new Error("Không thể kết nối đến máy chủ");
+    if (error instanceof TypeError) throw createNetworkApiError("Tài khoản", "POST", apiPath, error);
     throw error;
   }
 }
@@ -218,7 +256,13 @@ export function getStoredUser(): AuthUser | null {
   if (!raw) return null;
 
   try {
-    return JSON.parse(raw) as AuthUser;
+    const user = JSON.parse(raw) as AuthUser;
+    const token = String(user?.token || "").trim();
+    if (!user || typeof user !== "object" || !token || getTokenCookie() !== token) {
+      clearStoredUser();
+      return null;
+    }
+    return user;
   } catch {
     return null;
   }
@@ -227,4 +271,5 @@ export function getStoredUser(): AuthUser | null {
 export function clearStoredUser() {
   if (typeof window === "undefined") return;
   localStorage.removeItem(AUTH_STORAGE_KEY);
+  clearTokenCookie();
 }

@@ -3,12 +3,14 @@ import type { AuthUser } from "@/types/auth";
 export type ShipmentActionPermissionKey =
   | "createShipment"
   | "uploadDocument"
+  | "passDocument"
   | "archiveDocuments"
   | "editReturnItem"
   | "editShipmentDetails"
   | "cancelShipment"
   | "viewActivityLogs"
   | "manageUsers"
+  | "manageMasterData"
   | "registerUser"
   | "updateUserPassword";
 
@@ -29,6 +31,10 @@ export const SHIPMENT_ACTION_PERMISSIONS: Record<ShipmentActionPermissionKey, Ac
     { role: "admin", session: "all" },
     { role: "xnk", session: "edit" },
   ],
+  passDocument: [
+    { role: "admin", session: "all" },
+    { role: "xnk", session: "edit" },
+  ],
   archiveDocuments: [{ role: "admin", session: "all" },
     { role: "xnk", session: "edit" },],
   editReturnItem: [{ role: "admin", session: "all" },
@@ -39,6 +45,7 @@ export const SHIPMENT_ACTION_PERMISSIONS: Record<ShipmentActionPermissionKey, Ac
     { role: "xnk", session: "edit" },],
   viewActivityLogs: [{ role: "admin", session: "all" }],
   manageUsers: [{ role: "admin", session: "all" }],
+  manageMasterData: [{ role: "admin", session: "all" }],
   registerUser: [{ role: "admin", session: "all" }],
   updateUserPassword: [{ role: "admin", session: "all" }],
 };

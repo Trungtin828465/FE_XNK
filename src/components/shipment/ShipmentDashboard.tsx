@@ -12,20 +12,9 @@ import { useAuth } from "@/context/AuthContext";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useLanguage } from "@/context/LanguageContext";
 
-function normalizeFilterValue(value?: string): string {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/gi, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
-}
-
-function containsFilterValue(source?: string, selected?: string): boolean {
+function matchesFilterValue(source?: string, selected?: string): boolean {
   if (!selected) return true;
-  const sourceValue = normalizeFilterValue(source);
-  const selectedValue = normalizeFilterValue(selected);
-  return Boolean(sourceValue && selectedValue && sourceValue.includes(selectedValue));
+  return String(source || "").trim().toLocaleLowerCase("vi") === selected.trim().toLocaleLowerCase("vi");
 }
 
 export default function ShipmentDashboard() {
@@ -37,6 +26,8 @@ export default function ShipmentDashboard() {
   const [updatedBy, setUpdatedBy] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [supplierOptions, setSupplierOptions] = useState<string[]>([]);
+  const [carrierOptions, setCarrierOptions] = useState<string[]>([]);
 
   const [activeMetricFilter, setActiveMetricFilter] = useState<ShipmentStatus | "all">("all");
   const [filter, setFilter] = useState<ShipmentFilter>({
@@ -66,6 +57,8 @@ export default function ShipmentDashboard() {
         : current);
       setLastUpdated(result.lastUpdated);
       setUpdatedBy(result.updatedBy || "");
+      setSupplierOptions(result.supplierOptions);
+      setCarrierOptions(result.carrierOptions);
     } catch (error) {
       // Keep existing rows visible when the API is temporarily unavailable.
       setApiError(error instanceof Error ? error.message : "Không thể tải dữ liệu shipment");
@@ -122,13 +115,13 @@ export default function ShipmentDashboard() {
         .some(v => v?.toLowerCase().includes(q));
 
       // Supplier
-      const supplierOk = containsFilterValue(s.supplier, filter.supplier);
+      const supplierOk = matchesFilterValue(s.supplier, filter.supplier);
 
       // Port
-      const portOk = containsFilterValue(s.port, filter.port);
+      const portOk = matchesFilterValue(s.port, filter.port);
 
       // Vessel
-      const vesselOk = containsFilterValue(s.vessel, filter.vessel);
+      const vesselOk = matchesFilterValue(s.vessel, filter.vessel);
 
       // Date range
       let dateOk = true;
@@ -223,6 +216,8 @@ export default function ShipmentDashboard() {
       <ShipmentFilters
         filter={filter}
         onChange={handleFilterChange}
+        supplierOptions={supplierOptions}
+        carrierOptions={carrierOptions}
       />
 
       {/* Table */}

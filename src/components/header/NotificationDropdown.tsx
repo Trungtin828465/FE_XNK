@@ -2,19 +2,19 @@
 
 import { Modal } from "@/components/ui/modal";
 import {
-  getSheetNoti,
-  markAllNotificationsRead,
+  getNotifications,
+  markNotificationsRead,
   NOTIFICATIONS_SYNC_EVENT,
 } from "@/services/shipmentApi";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
 import { useLanguage } from "@/context/LanguageContext";
 
-type NotificationKind = "missing_docs" | "delivered" | "route_warning";
+type NotificationKind = "delivered" | "route_warning";
 
 type NotificationRow = {
-  id?: string | number;
+  id_thong_bao?: string | number;
   name?: string;
   order_code?: string;
   type?: string;
@@ -24,8 +24,7 @@ type NotificationRow = {
   updated_by?: string;
   update_by?: string;
   status?: string | number;
-  created_at?: string;
-  date?: string;
+  date_time?: string;
 };
 
 type NotificationItem = {
@@ -40,55 +39,55 @@ type NotificationItem = {
   time: string;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function extractNotificationRows(value: unknown): { found: boolean; rows: NotificationRow[] } {
-  if (Array.isArray(value)) {
-    return { found: true, rows: value.filter(isRecord) as NotificationRow[] };
-  }
-  if (!isRecord(value)) return { found: false, rows: [] };
-  if (Array.isArray(value.data)) {
-    return { found: true, rows: value.data.filter(isRecord) as NotificationRow[] };
-  }
-  if (Array.isArray(value.notifications)) {
-    return { found: true, rows: value.notifications.filter(isRecord) as NotificationRow[] };
-  }
-  if (isRecord(value.data)) return extractNotificationRows(value.data);
-  if (isRecord(value.notifications)) return extractNotificationRows(value.notifications);
-  return { found: false, rows: [] };
-}
-
 function normalizeType(value?: string): string {
-  return String(value || "").trim().toUpperCase();
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/gi, "d")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function getNotificationKind(row: NotificationRow): NotificationKind | null {
+  const values = [normalizeType(row.type), normalizeType(row.name)].filter(Boolean);
+  const delivered = values.some((value) =>
+    ["HOAN_THANH", "DON_HANG_HOAN_THANH", "DON_THANH_CONG", "GIAO_THANH_CONG", "DELIVERED", "COMPLETED", "ORDER_COMPLETED"].includes(value)
+    || value.includes("HOAN_THANH")
+    || value.includes("THANH_CONG"),
+  );
+  if (delivered) return "delivered";
+
+  const exceeded = values.some((value) =>
+    ["VUOT_LO_TRINH", "VUOT_TIEN_DO", "OVERDUE", "PROGRESS_EXCEEDED"].includes(value)
+    || value.includes("VUOT_LO_TRINH")
+    || value.includes("VUOT_TIEN_DO"),
+  );
+  return exceeded ? "route_warning" : null;
 }
 
 function mapRows(rows: NotificationRow[], translate: (key: string, variables?: Record<string, string | number>) => string): NotificationItem[] {
   return rows
-    .map((row, index) => {
+    .map((row, index): NotificationItem | null => {
       const type = normalizeType(row.type || row.name);
+      const kind = getNotificationKind(row);
+      if (!kind) return null;
       const orderCode = String(row.order_code || "").trim();
       const missingDocs = String(row.missing_docs || row.mss_docs || "").trim();
       const message = String(row.message || "").trim();
-      const time = String(row.created_at || row.date || "").trim();
+      const time = String(row.date_time || "").trim();
       const updatedBy = String(row.updated_by || row.update_by || "").trim();
-      const delivered = ["HOAN_THANH", "GIAO_THANH_CONG", "DELIVERED", "COMPLETED"].includes(type);
-      const routeWarning = type === "VUOT_LO_TRINH";
-      const kind: NotificationKind = delivered ? "delivered" : routeWarning ? "route_warning" : "missing_docs";
-      const title = delivered
+      const delivered = kind === "delivered";
+      const title = String(row.name || "").trim() || (delivered
         ? translate("delivered")
-        : routeWarning
-          ? translate("routeWarning")
-          : translate("documentWarning");
+        : translate("routeWarning"));
       const body = message || (delivered
         ? translate("deliveredBody", { orderCode })
-        : routeWarning
-          ? `${translate("routeWarningBody", { orderCode })}${missingDocs ? `. ${translate("missingSuffix")}: ${missingDocs}` : ""}`
-          : `${translate("missingDocumentBody", { orderCode })}${missingDocs ? `: ${missingDocs}` : ""}`);
+        : `${translate("routeWarningBody", { orderCode })}${missingDocs ? `. ${translate("missingSuffix")}: ${missingDocs}` : ""}`);
 
       return {
-        id: String(row.id ?? `${type}-${orderCode}-${time}-${index}`),
+        id: String(row.id_thong_bao ?? `${type}-${orderCode}-${time}-${index}`),
         kind,
         title,
         body,
@@ -99,6 +98,7 @@ function mapRows(rows: NotificationRow[], translate: (key: string, variables?: R
         time,
       };
     })
+    .filter((item): item is NotificationItem => item !== null)
     .sort((a, b) => {
       const timeA = Date.parse(a.time);
       const timeB = Date.parse(b.time);
@@ -129,8 +129,7 @@ function getNotificationKey(item: NotificationItem, index: number): string {
 
 function badgeTone(kind: NotificationKind): string {
   if (kind === "delivered") return "bg-success-500";
-  if (kind === "route_warning") return "bg-warning-500";
-  return "bg-error-500";
+  return "bg-warning-500";
 }
 
 export default function NotificationDropdown() {
@@ -140,9 +139,8 @@ export default function NotificationDropdown() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [syncWarning, setSyncWarning] = useState("");
   const [hasNewNotification, setHasNewNotification] = useState(false);
-  const [isMarkingRead, setIsMarkingRead] = useState(false);
+  const markingReadRef = useRef(false);
 
   const applyRows = useCallback((rows: NotificationRow[], announce = false) => {
     const mapped = mapRows(rows, t);
@@ -154,9 +152,8 @@ export default function NotificationDropdown() {
 
   const refreshNotifications = useCallback(async (announce = false) => {
     try {
-      const rows = await getSheetNoti();
+      const rows = await getNotifications();
       applyRows(rows as NotificationRow[], announce);
-      setSyncWarning("");
     } catch (refreshError) {
       setLoading(false);
       setError(refreshError instanceof Error ? refreshError.message : "Không thể tải thông báo");
@@ -164,63 +161,47 @@ export default function NotificationDropdown() {
   }, [applyRows]);
 
   useEffect(() => {
-    void refreshNotifications();
+    const timer = window.setTimeout(() => void refreshNotifications(), 0);
+    return () => window.clearTimeout(timer);
   }, [refreshNotifications]);
 
   useEffect(() => {
-    const handleUploadSync = (event: Event) => {
-      const sync = (event as CustomEvent<unknown>).detail;
-      const notificationPayload = isRecord(sync) ? sync.notifications : undefined;
-      const parsed = extractNotificationRows(notificationPayload);
-      const syncErrors = isRecord(sync) && Array.isArray(sync.errors) ? sync.errors : [];
-
-      if (parsed.found) applyRows(parsed.rows, true);
-      else void refreshNotifications(true);
-
-      setSyncWarning(syncErrors.length > 0
-        ? `Upload thành công nhưng đồng bộ chưa hoàn tất: ${syncErrors.map(String).join(", ")}`
-        : "");
-    };
+    const handleUploadSync = () => void refreshNotifications(true);
 
     window.addEventListener(NOTIFICATIONS_SYNC_EVENT, handleUploadSync);
     return () => window.removeEventListener(NOTIFICATIONS_SYNC_EVENT, handleUploadSync);
-  }, [applyRows, refreshNotifications]);
+  }, [refreshNotifications]);
 
   const latestThree = useMemo(() => notifications.slice(0, 3), [notifications]);
   const unreadCount = useMemo(() => notifications.filter(isUnread).length, [notifications]);
 
-  const markNotificationsAsViewed = async () => {
-    if (isMarkingRead) return;
-    setHasNewNotification(false);
-    setIsMarkingRead(true);
-    setError("");
+  const markUnreadAsRead = useCallback(async () => {
+    if (markingReadRef.current) return;
+    markingReadRef.current = true;
     try {
-      await markAllNotificationsRead();
-      // Chỉ cập nhật status từ dữ liệu backend sau khi POST thành công.
-      const rows = await getSheetNoti();
-      const notificationRows = rows as NotificationRow[];
-      applyRows(notificationRows);
-      if (mapRows(notificationRows, t).some(isUnread)) {
-        setError("Backend đã nhận yêu cầu nhưng Sheet vẫn còn thông báo status = 0. Kiểm tra hàm markAllNotificationsRead phía Backend/Apps Script.");
-      }
+      const rows = await getNotifications() as NotificationRow[];
+      const unreadIds = rows
+        .filter((row) => String(row.status ?? "") === "0" && row.id_thong_bao !== undefined && row.id_thong_bao !== null)
+        .map((row) => row.id_thong_bao as string | number);
+      if (unreadIds.length > 0) await markNotificationsRead(unreadIds);
+      await refreshNotifications();
     } catch (markError) {
-      setError(markError instanceof Error ? markError.message : "Không thể đánh dấu thông báo đã đọc");
+      setError(markError instanceof Error ? markError.message : "Không thể cập nhật trạng thái thông báo đã đọc");
     } finally {
-      setIsMarkingRead(false);
+      markingReadRef.current = false;
     }
-  };
+  }, [refreshNotifications]);
 
   const handleToggle = () => {
     const willOpen = !isOpen;
     setHasNewNotification(false);
     setIsOpen(willOpen);
-    if (willOpen && unreadCount > 0) void markNotificationsAsViewed();
+    if (willOpen) void markUnreadAsRead();
   };
 
-  const handleViewAll = async () => {
+  const handleViewAll = () => {
     setIsModalOpen(true);
     setIsOpen(false);
-    await markNotificationsAsViewed();
   };
 
   const renderNotification = (item: NotificationItem, index: number, compact = false) => (
@@ -273,7 +254,6 @@ export default function NotificationDropdown() {
 
         <div className="max-h-[420px] overflow-y-auto custom-scrollbar">
           {hasNewNotification && <div className="mb-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Có thông báo mới từ lần upload gần nhất.</div>}
-          {syncWarning && <div className="mb-2 rounded-lg border border-warning-200 bg-warning-50 px-3 py-2 text-xs font-medium text-warning-700 dark:border-warning-500/30 dark:bg-warning-500/10 dark:text-warning-300">{syncWarning}</div>}
           {error && <div className="mb-2 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-xs font-medium text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">{error}</div>}
 
           {loading ? (
@@ -291,8 +271,8 @@ export default function NotificationDropdown() {
           )}
 
           {notifications.length > 0 && (
-            <button type="button" onClick={() => void handleViewAll()} disabled={isMarkingRead} className="mt-3 w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">
-              {isMarkingRead ? t("updating") : t("viewAllNotifications")}
+            <button type="button" onClick={handleViewAll} className="mt-3 w-full rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700">
+              {t("viewAllNotifications")}
             </button>
           )}
         </div>

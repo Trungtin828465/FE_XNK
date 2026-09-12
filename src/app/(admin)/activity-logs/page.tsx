@@ -177,8 +177,8 @@ export default function ActivityLogsPage() {
         ) : (
           <>
             <div className="space-y-3 p-4 lg:hidden">
-              {displayedLogs.map((log) => (
-                <article key={log.id} className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
+              {displayedLogs.map((log, logIndex) => (
+                <article key={log.id || `mobile-log-${logIndex}`} className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
                   <div className="flex items-start justify-between gap-3">
                     <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-400">
                       {getActionLabel(log.action)}
@@ -214,8 +214,8 @@ export default function ActivityLogsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {displayedLogs.map((log) => (
-                    <tr key={log.id} className="align-top transition-colors hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
+                  {displayedLogs.map((log, logIndex) => (
+                    <tr key={log.id || `desktop-log-${logIndex}`} className="align-top transition-colors hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
                       <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{formatDateTime(log.createdAt)}</td>
                       <td className="px-5 py-4 text-sm font-semibold text-gray-800 dark:text-white/90">{getActor(log)}</td>
                       <td className="break-words px-5 py-4 text-sm text-gray-600 dark:text-gray-300">{log.role || "—"}</td>

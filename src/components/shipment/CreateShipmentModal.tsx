@@ -2,12 +2,15 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Modal } from "@/components/ui/modal";
-import { analyzeDocument, editSummary, uploadDocument } from "@/services/shipmentApi";
+import { analyzeDocument, uploadDocument } from "@/services/shipmentApi";
+import { createDatabaseRow, databaseEndpoints, listDatabaseRows } from "@/services/postgresShipmentApi";
+import type { PurchaseDetailRecord, PurchaseItemCodeRecord, PurchaseRecord, SupplierRecord } from "@/types/postgresShipment";
 import { useAuth } from "@/context/AuthContext";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
 import { useLanguage } from "@/context/LanguageContext";
+import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
 
 interface CreateShipmentModalProps {
   isOpen: boolean;
@@ -23,6 +26,9 @@ interface ReviewFields {
   origin: string;
   product: string;
   totalPrice: string;
+  unitPrice: string;
+  itemCode: string;
+  factoryCode: string;
 }
 
 const REQUIRED_REVIEW_FIELDS: Array<{ key: keyof ReviewFields; label: string }> = [
@@ -32,6 +38,7 @@ const REQUIRED_REVIEW_FIELDS: Array<{ key: keyof ReviewFields; label: string }> 
   { key: "origin", label: "Xuất xứ" },
   { key: "product", label: "Tên sản phẩm" },
   { key: "totalPrice", label: "Giá tổng" },
+  { key: "unitPrice", label: "Đơn giá" },
 ];
 
 const EMPTY_FIELDS: ReviewFields = {
@@ -41,10 +48,42 @@ const EMPTY_FIELDS: ReviewFields = {
   origin: "",
   product: "",
   totalPrice: "",
+  unitPrice: "",
+  itemCode: "",
+  factoryCode: "",
 };
 
 function normalizeKey(value: string): string {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/đ/g, "d").replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeDatabaseDate(value: string): string | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const local = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (!local) return raw;
+  return `${local[3]}-${local[2].padStart(2, "0")}-${local[1].padStart(2, "0")}`;
+}
+
+function normalizeDatabaseNumber(value: string): number | null {
+  const raw = value.trim().replace(/[^\d,.-]/g, "");
+  if (!raw) return null;
+
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+  let normalized = raw;
+  if (lastComma > lastDot) {
+    normalized = raw.replace(/\./g, "").replace(",", ".");
+  } else if (lastDot > lastComma && lastComma >= 0) {
+    normalized = raw.replace(/,/g, "");
+  } else if (lastComma >= 0) {
+    normalized = raw.replace(",", ".");
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function readField(data: Record<string, string>, names: string[]): string {
@@ -61,6 +100,9 @@ function mapOcrFields(data: Record<string, string>): ReviewFields {
     origin: readField(data, ["XUẤT XỨ", "Xuat_xu"]),
     product: readField(data, ["Tên hàng", "Ten_hang"]),
     totalPrice: readField(data, ["Giá tổng", "Gia"]),
+    unitPrice: readField(data, ["Đơn giá", "Don gia", "Unit price"]),
+    itemCode: readField(data, ["Item code", "Item Code"]),
+    factoryCode: readField(data, ["Mã nhà máy", "Ma nha may", "Factory code"]),
   };
 }
 
@@ -91,6 +133,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState("");
+  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
 
   useEffect(() => {
     if (isOpen && !file) {
@@ -98,6 +141,27 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       return () => window.clearTimeout(timer);
     }
   }, [isOpen, file]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void listDatabaseRows<SupplierRecord>(databaseEndpoints.suppliers)
+      .then(setSuppliers)
+      .catch((loadError) => setError(loadError instanceof Error ? loadError.message : "Không thể tải danh sách nhà cung cấp"));
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (suppliers.length === 0) return;
+    setFields((current) => {
+      if (!current.supplier) return current;
+      const supplier = findBestCatalogMatch(current.supplier, suppliers, "ten_ncc");
+      if (!supplier) return current;
+      return {
+        ...current,
+        supplier: supplier.ten_ncc,
+        origin: String(supplier.quoc_gia || ""),
+      };
+    });
+  }, [suppliers]);
 
   useEffect(() => {
     if (!file) {
@@ -142,7 +206,11 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       const base64 = await fileToBase64(selected);
       setFileData(base64);
       const result = await analyzeDocument({ documentType: "PI", file: selected });
-      setFields(mapOcrFields(result.data));
+      const mapped = mapOcrFields(result.data);
+      const supplier = findBestCatalogMatch(mapped.supplier, suppliers, "ten_ncc");
+      setFields(supplier
+        ? { ...mapped, supplier: supplier.ten_ncc, origin: String(supplier.quoc_gia || "") }
+        : mapped);
     } catch (err) {
       setFile(null);
       setFileData("");
@@ -156,12 +224,25 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     setFields((current) => ({ ...current, [key]: value }));
   };
 
+  const handleSupplierChange = (supplierName: string) => {
+    const supplier = suppliers.find((item) => item.ten_ncc === supplierName);
+    setFields((current) => ({
+      ...current,
+      supplier: supplierName,
+      origin: String(supplier?.quoc_gia || ""),
+    }));
+  };
+
   const normalizedOrderCode = fields.orderCode.trim().toUpperCase().replace(/\s+/g, "");
   const duplicateOrderCode = Boolean(normalizedOrderCode && existingOrderCodes.some(
     (code) => code.trim().toUpperCase().replace(/\s+/g, "") === normalizedOrderCode,
   ));
   const missingRequiredFields = REQUIRED_REVIEW_FIELDS
-    .filter(({ key }) => !fields[key].trim())
+    .filter(({ key }) => {
+      if (!fields[key].trim()) return true;
+      if (key === "supplier") return !suppliers.some((supplier) => supplier.ten_ncc === fields.supplier);
+      return false;
+    })
     .map(({ label }) => label);
   const hasMissingRequiredFields = missingRequiredFields.length > 0;
 
@@ -175,26 +256,55 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       setError(`Vui lòng bổ sung đầy đủ: ${missingRequiredFields.join(", ")}.`);
       return;
     }
+    if (normalizedOrderCode.length > 100) {
+      setError("Mã đơn hàng không được vượt quá 100 ký tự.");
+      return;
+    }
+    const supplier = suppliers.find((item) => normalizeKey(item.ten_ncc) === normalizeKey(fields.supplier));
+    if (!supplier) {
+      setError(`Nhà cung cấp ${fields.supplier.trim()} chưa có trong danh mục PostgreSQL.`);
+      return;
+    }
+    if (Boolean(fields.itemCode.trim()) !== Boolean(fields.factoryCode.trim())) {
+      setError("Item code và mã nhà máy phải được nhập cùng nhau.");
+      return;
+    }
 
     setIsSaving(true);
     setError("");
     try {
+      await createDatabaseRow<PurchaseRecord>(databaseEndpoints.purchases, {
+        ma_hop_dong: normalizedOrderCode,
+        ngay_hop_dong: normalizeDatabaseDate(fields.orderDate),
+        ma_inv: null,
+        ngay_inv: null,
+        id_ncc: supplier.id_ncc,
+        is_deleted: false,
+      });
+      const createdDetail = await createDatabaseRow<PurchaseDetailRecord>(databaseEndpoints.purchaseDetails, {
+        ma_hop_dong: normalizedOrderCode,
+        ten_hang: fields.product.trim(),
+        net_weight: null,
+        so_kien: null,
+        don_vi_kien: null,
+        don_gia: normalizeDatabaseNumber(fields.unitPrice),
+        tong_gia: normalizeDatabaseNumber(fields.totalPrice),
+      });
+      if (fields.itemCode.trim() && fields.factoryCode.trim()) {
+        if (!createdDetail.id_chi_tiet) throw new Error("Backend không trả id_chi_tiet sau khi tạo chi tiết mua hàng");
+        await createDatabaseRow<PurchaseItemCodeRecord>(databaseEndpoints.itemCodes, {
+          id_chi_tiet: createdDetail.id_chi_tiet,
+          ma_nha_may: fields.factoryCode.trim(),
+          item_code: fields.itemCode.trim(),
+        });
+      }
       await uploadDocument({
         action: "uploadDocument",
-        orderCode: fields.orderCode.trim(),
+        orderCode: normalizedOrderCode,
         documentCode: "PI",
         fileName: file.name,
         fileData,
       });
-
-      const data: Record<string, string | number> = {
-        "Ngày HĐ PI": fields.orderDate.trim(),
-        "Nhà cung cấp": fields.supplier.trim(),
-        "XUẤT XỨ": fields.origin.trim(),
-        "Tên hàng": fields.product.trim(),
-        "Giá tổng": fields.totalPrice.trim(),
-      };
-      await editSummary({ action: "editSummary", orderCode: fields.orderCode.trim(), data });
       recordActivity(user, {
         action: "CREATE_SHIPMENT",
         location: "ShipmentDashboard/CreateShipmentModal",
@@ -217,11 +327,19 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     ["origin", "Xuất xứ"],
     ["product", "Tên sản phẩm"],
     ["totalPrice", "Giá tổng"],
+    ["unitPrice", "Đơn giá"],
+    ["itemCode", "Item code"],
+    ["factoryCode", "Mã nhà máy"],
   ];
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={handleClose} className="mx-2 flex max-h-[96vh] max-w-5xl flex-col overflow-hidden sm:mx-4 sm:max-h-[94vh]">
+      <Modal
+        isOpen={isOpen}
+        onClose={handleClose}
+        contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+        className={`mx-2 my-2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl flex-col overflow-hidden transition-[width,transform] duration-300 sm:mx-4 sm:my-4 sm:max-h-[94vh] sm:w-full ${isFilePanelOpen && !isFilePanelMaximized ? "md:w-[calc(50vw-1.5rem)] md:max-w-none md:-translate-x-1/2" : ""}`}
+      >
       <div className="border-b border-gray-100 px-6 pb-4 pt-6 dark:border-gray-800">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("createNewShipment")}</h2>
         <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Chọn file PI để hệ thống OCR phân tích thông tin.</p>
@@ -233,7 +351,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         </button>
 
         {isAnalyzing && <p className="text-center text-sm text-gray-500">{t("analyzingPi")}</p>}
-        {duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">Mã PI <strong>{fields.orderCode.trim()}</strong> đã tồn tại trong Sheet Summary. Vui lòng kiểm tra lại file PI.</p>}
+        {duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">Mã đơn <strong>{fields.orderCode.trim()}</strong> đã tồn tại trong PostgreSQL. Vui lòng kiểm tra lại file PI.</p>}
         {error && !duplicateOrderCode && <p className="rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{error}</p>}
 
         {file && !isAnalyzing && !error && (
@@ -250,7 +368,17 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
                 {reviewFields.map(([key, label]) => (
                   <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
                     <span>{label} <span className="text-error-500">*</span></span>
-                    <input type="text" value={fields[key]} onChange={(event) => updateField(key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                    {key === "supplier" ? (
+                      <select value={fields.supplier} onChange={(event) => handleSupplierChange(event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+                        <option value="">Chọn nhà cung cấp</option>
+                        {fields.supplier && !suppliers.some((supplier) => normalizeCatalogText(supplier.ten_ncc) === normalizeCatalogText(fields.supplier)) && (
+                          <option value={fields.supplier} disabled>OCR chưa khớp: {fields.supplier}</option>
+                        )}
+                        {suppliers.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.ten_ncc}</option>)}
+                      </select>
+                    ) : (
+                      <input type="text" value={fields[key]} readOnly={key === "origin"} onChange={(event) => updateField(key, event.target.value)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:read-only:bg-gray-800" />
+                    )}
                   </label>
                 ))}
               </div>
@@ -270,16 +398,25 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
       </div>
     </Modal>
       {isFilePanelOpen && filePreviewUrl && (
-        <aside className={`fixed right-0 top-0 z-[100000] flex h-screen flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isFilePanelMaximized ? "w-full" : "w-[min(92vw,620px)]"}`}>
+        <aside className={`fixed right-0 top-0 z-[100000] flex h-screen min-h-0 flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isFilePanelMaximized ? "w-full" : "w-[92vw] md:w-1/2"}`}>
           <div className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">
             <p className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-white">{file?.name || "File PI"}</p>
             <button type="button" onClick={() => setIsFilePanelMaximized((current) => !current)} className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{isFilePanelMaximized ? "Thu nhỏ" : "Phóng to"}</button>
-            <button type="button" onClick={() => setIsFilePanelOpen(false)} className="rounded-lg px-2 text-xl leading-none text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Đẩy panel sang phải">→</button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
-            <iframe title={`Xem ${file?.name || "File PI"}`} src={filePreviewUrl} className="h-full min-h-[calc(100vh-5rem)] w-full rounded-lg bg-white" />
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
+            <iframe title={`Xem ${file?.name || "File PI"}`} src={filePreviewUrl} className="block h-[calc(100vh-4.5rem)] min-h-[720px] w-full rounded-lg bg-white" />
           </div>
         </aside>
+      )}
+      {filePreviewUrl && isFilePanelOpen && (
+        <button type="button" onClick={() => { setIsFilePanelOpen(false); setIsFilePanelMaximized(false); }} className="fixed right-0 top-1/2 z-[100001] -translate-y-1/2 rounded-l-xl border border-r-0 border-brand-200 bg-brand-500 px-3 py-4 text-sm font-semibold text-white shadow-lg hover:bg-brand-600" aria-label="Đóng file PI">
+          → File
+        </button>
+      )}
+      {filePreviewUrl && !isFilePanelOpen && file && !isAnalyzing && (
+        <button type="button" onClick={() => setIsFilePanelOpen(true)} className="fixed right-0 top-1/2 z-[100000] -translate-y-1/2 rounded-l-xl border border-r-0 border-brand-200 bg-brand-500 px-3 py-4 text-sm font-semibold text-white shadow-lg hover:bg-brand-600" aria-label="Mở file PI">
+          ← File
+        </button>
       )}
     </>
   );

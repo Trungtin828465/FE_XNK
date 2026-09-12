@@ -4,8 +4,10 @@ import { Modal } from "@/components/ui/modal";
 import type { Shipment } from "@/types/shipment";
 import ShipmentStatusBar, { type ShipmentFlowStage } from "./ShipmentStatusBar";
 import { useAuth } from "@/context/AuthContext";
-import { analyzeDocument, checkDocumentsAndSaveStatus, editReturnItem, editSummary, fetchReturnItem, getArchivedDocuments, launchCKLineTracking, launchEvergreenTracking, moveCompletedOrder, SUMMARY_FIELDS, uploadDocument } from "@/services/shipmentApi";
+import { analyzeDocument, checkDocumentProgress, fetchReturnItem, getArchivedDocuments, launchCKLineTracking, launchEvergreenTracking, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentProgressResponse } from "@/services/shipmentApi";
+import { cancelPostgresShipment, databaseEndpoints, listDatabaseRows, passDriveDocument, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
+import type { CarrierRecord, PostgresShipmentRelations, PurchaseDetailRecord, SupplierRecord } from "@/types/postgresShipment";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
@@ -13,6 +15,9 @@ import { useSystemConfirm } from "@/context/SystemConfirmContext";
 import { useLanguage } from "@/context/LanguageContext";
 import { submitEvergreenTracking } from "@/utils/evergreenTracking";
 import { CK_LINE_CARRIER_CONFIG } from "@/utils/ckLineTracking";
+import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
+import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCatalogOptions";
+import { toDocumentPreviewUrl } from "@/utils/documentPreview";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 
@@ -104,16 +109,18 @@ const RETURN_FIELD_GROUPS: Array<{
   {
     labelKey: "transportLocationsGroup",
     fields: [
-      { key: "noiLayHang", labelKey: "pickupLocation" },
-      { key: "noiHaRong", labelKey: "emptyReturnLocation" },
-      { key: "noiTraHang", labelKey: "deliveryLocation" },
+      { key: "noiDi", labelKey: "departureLocation" },
+      { key: "idKho", labelKey: "warehouseCode" },
+      { key: "tenKho", labelKey: "warehouseName" },
+      { key: "ghiChu", labelKey: "note" },
     ],
   },
   {
     labelKey: "vehicleContainerGroup",
     fields: [
-      { key: "nhapXuat", labelKey: "containerType" },
-      { key: "xeTai", labelKey: "vehicleNumber" },
+      { key: "nhaXe", labelKey: "carrierCompany" },
+      { key: "tenTaiXe", labelKey: "driverName" },
+      { key: "bienSoXe", labelKey: "vehicleNumber" },
     ],
   },
 ];
@@ -464,8 +471,36 @@ type OcrDocumentType = "PI" | "INV" | "PKL" | "BL";
 const OCR_REQUIRED_FIELDS: Record<OcrDocumentType, string[]> = {
   PI: ["Số HĐ", "Ngày HĐ PI", "Nhà cung cấp", "XUẤT XỨ", "Tên hàng", "Giá tổng", "Đơn giá"],
   INV: ["INV", "Ngày INV"],
-  PKL: ["Số hộp", "Trọng lượng", "Trọng lượng cả bì"],
-  BL: ["BL NO.", "Số Container", "Hãng tàu", "ETD", "Cảng đến"],
+  PKL: ["Số kiện", "Trọng lượng NET"],
+  BL: ["BL NO.", "Mã Container", "Hãng tàu", "Cảng đi", "Cảng đến", "ETD"],
+};
+
+const OCR_FIELD_ALIASES: Record<OcrDocumentType, Record<string, string[]>> = {
+  PI: {
+    "Số HĐ": ["Số HĐ", "Mã PI", "Số PI", "Order code"],
+    "Ngày HĐ PI": ["Ngày HĐ PI", "Ngày PI", "Ngày HĐ"],
+    "Nhà cung cấp": ["Nhà cung cấp", "NCC", "Supplier"],
+    "XUẤT XỨ": ["XUẤT XỨ", "Xuất xứ", "Origin"],
+    "Tên hàng": ["Tên hàng", "Tên sản phẩm", "Product"],
+    "Giá tổng": ["Giá tổng", "Tổng tiền", "Total amount"],
+    "Đơn giá": ["Đơn giá", "Unit price"],
+  },
+  INV: {
+    INV: ["INV", "Mã INV", "Số INV", "Invoice No", "Invoice number"],
+    "Ngày INV": ["Ngày INV", "Invoice date", "Ngày hóa đơn"],
+  },
+  PKL: {
+    "Số kiện": ["Số kiện", "Số hộp", "Quantity", "Packages"],
+    "Trọng lượng NET": ["Trọng lượng NET", "Net weight", "Trọng lượng", "Khối lượng net"],
+  },
+  BL: {
+    "BL NO.": ["BL NO.", "BL", "Mã BL", "B/L", "Bill of lading"],
+    "Mã Container": ["Mã Container", "Container", "Container No", "Số Container"],
+    "Hãng tàu": ["Hãng tàu", "Carrier", "Shipping line"],
+    "Cảng đi": ["Cảng đi", "POL", "Port of loading"],
+    "Cảng đến": ["Cảng đến", "POD", "Port of discharge"],
+    ETD: ["ETD", "Ngày khởi hành"],
+  },
 };
 
 function normalizeSheetField(value: string): string {
@@ -500,13 +535,12 @@ function formatSheetDateOnly(value: string): string {
 function localizeSheetField(field: string, translate: (key: string) => string): string {
   const fieldKeys: Record<string, string> = {
     sohd: "orderNumber", ngayhdpi: "piDate", nhacungcap: "supplier", xuatxu: "origin",
-    tennhamay: "factoryName", manhamay: "factoryCode", tenhang: "productName", itemcode: "itemCode",
+    manhamay: "factoryCode", tenhang: "productName", itemcode: "itemCode",
     mahang: "itemCode", dongia: "unitPrice", unitprice: "unitPrice", giatong: "totalAmount",
     tongtien: "totalAmount", totalamount: "totalAmount", inv: "invoiceNumber", ngayinv: "invoiceDate",
     sohop: "quantity", soluong: "quantity", quantity: "quantity",
     trongluong: "netWeight", trongluongtinh: "netWeight", netweight: "netWeight",
-    khoiluongnet: "netWeight", trongluongcabi: "grossWeight", grossweight: "grossWeight",
-    khoiluonggross: "grossWeight", weight: "grossWeight", tiencoc: "depositAmount",
+    khoiluongnet: "netWeight", tiencoc: "depositAmount",
     sotiencoc: "depositAmount",
     sotienthanhtoan: "paymentAmount", tienthanhtoan: "paymentAmount", blno: "billNumber",
     mabl: "billNumber", macontainer: "containerCode", macont: "containerCode", macong: "containerCode",
@@ -549,7 +583,6 @@ const DETAIL_FIELD_GROUPS: DetailFieldGroup[] = [
       { sheetField: "Nhà cung cấp", labelKey: "supplier" },
       { sheetField: "XUẤT XỨ", labelKey: "origin" },
       { sheetField: "Mã nhà máy", labelKey: "factoryCode" },
-      { sheetField: "Tên nhà máy", labelKey: "factoryName" },
     ],
   },
   {
@@ -579,7 +612,6 @@ const DETAIL_FIELD_GROUPS: DetailFieldGroup[] = [
       { sheetField: "Số hộp", labelKey: "quantity" },
       { sheetField: "Giá tổng", labelKey: "totalAmount" },
       { sheetField: "Trọng lượng", labelKey: "netWeight" },
-      { sheetField: "Trọng lượng cả bì", labelKey: "grossWeight" },
     ],
   },
   {
@@ -594,6 +626,7 @@ const DETAIL_FIELD_GROUPS: DetailFieldGroup[] = [
       { sheetField: "Mã Container", labelKey: "containerCode" },
       { sheetField: "Số container", labelKey: "containerNumber" },
       { sheetField: "Hãng tàu", labelKey: "carrier" },
+      { sheetField: "Cảng đi", labelKey: "departurePort" },
       { sheetField: "Cảng đến", labelKey: "destinationPort" },
       { sheetField: "ETD", labelKey: "estimatedDeparture" },
       { sheetField: "ETA", labelKey: "estimatedArrival" },
@@ -628,13 +661,95 @@ function isReadOnlyDetailField(field: string): boolean {
   return ["stt", "sohd", "ordercode"].includes(normalizeSheetField(field));
 }
 
-function ensureRequiredOcrFields(data: Record<string, string>, documentType: OcrDocumentType): Record<string, string> {
-  const fields = { ...data };
-  const existingKeys = new Set(Object.keys(fields).map(normalizeSheetField));
-  OCR_REQUIRED_FIELDS[documentType].forEach((field) => {
-    if (!existingKeys.has(normalizeSheetField(field))) fields[field] = "";
-  });
-  return fields;
+type PurchaseDetailWithItems = PostgresShipmentRelations["details"][number];
+
+function PurchaseDetailsTable({
+  group,
+  details,
+  editing,
+  onChange,
+  translate,
+}: {
+  group: Omit<DetailFieldGroup, "fields">;
+  details: PurchaseDetailWithItems[];
+  editing: boolean;
+  onChange: (id: string, field: keyof PurchaseDetailRecord, value: string) => void;
+  translate: (key: string) => string;
+}) {
+  return (
+    <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
+      <div className={`flex items-center gap-3 border-b border-gray-100 px-4 py-3.5 dark:border-gray-800 sm:px-5 ${group.headerClass}`}>
+        <span className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-xs font-bold shadow-sm ${group.badgeClass}`}>{group.number}</span>
+        <div className="min-w-0">
+          <h4 className="text-sm font-bold text-gray-900 dark:text-white">{translate(group.labelKey)}</h4>
+          <p className="mt-0.5 text-xs leading-5 text-gray-500 dark:text-gray-400">{translate(group.descriptionKey)}</p>
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] text-left">
+          <thead className="bg-gray-50 text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:bg-gray-900/50 dark:text-gray-400">
+            <tr>
+              <th className="px-4 py-3">#</th>
+              <th className="px-4 py-3">{translate("productName")}</th>
+              <th className="px-4 py-3">Item code / {translate("factoryCode")}</th>
+              <th className="px-4 py-3">{translate("quantity")}</th>
+              <th className="px-4 py-3">{translate("netWeight")}</th>
+              <th className="px-4 py-3">{translate("unitPrice")}</th>
+              <th className="px-4 py-3">{translate("totalAmount")}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+            {details.map((detail, index) => (
+              <tr key={detail.id_chi_tiet || `purchase-detail-${index}`} className="align-top hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
+                <td className="px-4 py-3 text-xs font-semibold text-gray-400">{index + 1}</td>
+                <EditableTableCell value={detail.ten_hang} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet, "ten_hang", value)} />
+                <td className="px-4 py-3">
+                  {detail.itemCodes.length > 0 ? detail.itemCodes.map((item, itemIndex) => (
+                    <div key={item.id_item_code || `${detail.id_chi_tiet || index}-item-${itemIndex}`} className="mb-1 flex flex-wrap gap-1 last:mb-0">
+                      <span className="rounded-md bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{item.item_code}</span>
+                      <span className="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">{item.ma_nha_may}</span>
+                    </div>
+                  )) : <span className="text-xs text-gray-400">—</span>}
+                </td>
+                <EditableTableCell value={detail.so_kien} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet, "so_kien", value)} suffix={detail.don_vi_kien} />
+                <EditableTableCell value={detail.net_weight} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet, "net_weight", value)} />
+                <EditableTableCell value={detail.don_gia} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet, "don_gia", value)} />
+                <EditableTableCell value={detail.tong_gia} editing={editing} onChange={(value) => onChange(detail.id_chi_tiet, "tong_gia", value)} />
+              </tr>
+            ))}
+            {details.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">Đơn hàng chưa có chi tiết mua hàng.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function EditableTableCell({ value, editing, onChange, suffix }: { value: unknown; editing: boolean; onChange: (value: string) => void; suffix?: string | null }) {
+  const text = value == null ? "" : String(value);
+  return (
+    <td className="px-4 py-3">
+      {editing ? (
+        <input value={text} onChange={(event) => onChange(event.target.value)} className="h-9 w-full min-w-24 rounded-lg border border-gray-200 bg-white px-2.5 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+      ) : (
+        <span className="text-sm text-gray-700 dark:text-gray-300">{text || "—"}{text && suffix ? ` ${suffix}` : ""}</span>
+      )}
+    </td>
+  );
+}
+
+function isDatabaseReadOnlyField(group: DetailFieldGroupKey, field: string): boolean {
+  const normalized = normalizeSheetField(field);
+  return group === "internationalPayment" || normalized === "xuatxu" || normalized === "socontainer";
+}
+
+function normalizeOcrFields(data: Record<string, string>, documentType: OcrDocumentType): Record<string, string> {
+  const aliases = OCR_FIELD_ALIASES[documentType];
+  return Object.fromEntries(OCR_REQUIRED_FIELDS[documentType].map((field) => {
+    const wanted = new Set((aliases[field] || [field]).map(normalizeSheetField));
+    const found = Object.entries(data).find(([key]) => wanted.has(normalizeSheetField(key)));
+    return [field, String(found?.[1] ?? "").trim()];
+  }));
 }
 
 function getMissingOcrFields(fields: Record<string, string>, documentType: OcrDocumentType | null): string[] {
@@ -649,124 +764,6 @@ function getMissingOcrFields(fields: Record<string, string>, documentType: OcrDo
 function getOcrDocumentType(documentCode: string): OcrDocumentType | null {
   const code = documentCode.toUpperCase();
   return code === "PI" || code === "INV" || code === "PKL" ? code : code === "BL" ? "BL" : null;
-}
-
-function normalizeDocKey(name: string): string {
-  return name.toUpperCase().replace(/[^A-Z0-9_]/g, "");
-}
-
-function getStageOrder(stage: ShipmentFlowStage["key"]): number {
-  return FLOW_STAGES.findIndex((s) => s.key === stage);
-}
-
-function hasOutOfOrderDocuments(shipment: Shipment): boolean {
-  const documents = shipment.documents || [];
-  const activeStage = shipment.flowStageKey || "buying";
-  if (activeStage === "delivered") return false;
-
-  const currentIndex = getStageOrder(activeStage);
-  if (currentIndex < 0) return false;
-
-  const currentStageKeys = STAGE_DOC_GROUPS[activeStage];
-  const laterStageKeys = FLOW_STAGES.slice(currentIndex + 1)
-    .map((stage) => (stage.key === "delivered" ? ["TRA_CONG"] : STAGE_DOC_GROUPS[stage.key as Exclude<ShipmentFlowStage["key"], "delivered">]))
-    .flat();
-
-  const hasMissingCurrentStageDocs = currentStageKeys.some((key) =>
-    documents.some((doc) => normalizeDocKey(doc.name).includes(key) && doc.status !== "ok")
-  );
-
-  const hasLaterStageDocs = laterStageKeys.some((key) =>
-    documents.some((doc) => normalizeDocKey(doc.name).includes(key) && doc.status === "ok")
-  );
-
-  return hasMissingCurrentStageDocs && hasLaterStageDocs;
-}
-
-function buildFallbackName(email: string): string {
-  const localPart = email.split("@")[0] || "";
-  const parts = localPart.replace(/[._-]+/g, " ").trim();
-  return parts || "Người nhận";
-}
-
-function toReadableName(email?: string, ownerName?: string): string {
-  if (ownerName && ownerName.trim()) return ownerName.trim();
-  if (email) return buildFallbackName(email);
-  return "";
-}
-
-async function fetchPIRecipient(orderCode: string): Promise<{ email: string; name: string } | null> {
-  try {
-    const res = await fetch(`${API_BASE}/api/getPIFiles`, {
-      cache: "no-store",
-    });
-
-    if (!res.ok) return null;
-
-    const json = await res.json();
-    const files = Array.isArray(json?.files) ? json.files : [];
-    const matchedFile = files.find((file: { fileName?: string; ownerEmail?: string; ownerName?: string }) => {
-      const fileName = String(file?.fileName || "").toUpperCase();
-      return fileName.includes(orderCode.toUpperCase()) && (file?.ownerEmail || file?.ownerName);
-    });
-
-    const firstFile = matchedFile || files.find((file: { ownerEmail?: string; ownerName?: string }) => file?.ownerEmail || file?.ownerName);
-    if (!firstFile) return null;
-
-    const email = String(firstFile.ownerEmail || "").trim();
-    const name = toReadableName(email, String(firstFile.ownerName || "").trim());
-    if (!email) return null;
-
-    return { email, name };
-  } catch (error) {
-    console.warn("Không lấy được PI recipient", error);
-    return null;
-  }
-}
-
-function pickRecipient(shipment: Shipment) {
-  const docs = shipment.documents || [];
-  const missingDocs = docs.filter((doc) => doc.status === "missing" || doc.status === "pending");
-  const okDocs = docs.filter((doc) => doc.status === "ok");
-
-  const relatedCandidates = [
-    ["INV", "BL", "CO", "HC", "PKL"],
-    ["BL", "CO", "HC", "PKL", "INV"],
-    ["QDTQ", "MV", "15B"],
-    ["DON_KD"],
-    ["BB_LM", "PHI_TK", "THUE_NK", "TK"],
-    ["TRA_CONG", "QDTQ", "MV"],
-  ];
-
-  const pickFromDocs = (docList: typeof docs, keys: string[]) => {
-    for (const key of keys) {
-      const match = docList.find((doc) => normalizeDocKey(doc.name).includes(key));
-      if (match?.uploaderEmail) {
-        return {
-          email: match.uploaderEmail,
-          name: match.uploaderName || buildFallbackName(match.uploaderEmail),
-        };
-      }
-    }
-    return null;
-  };
-
-  for (const missing of missingDocs) {
-    const missingKey = normalizeDocKey(missing.name);
-    const candidateKeys = relatedCandidates.find((group) => group.some((k) => missingKey.includes(k))) || ["INV", "BL", "CO", "HC", "PKL", "QDTQ", "MV", "15B", "DON_KD", "BB_LM", "PHI_TK", "THUE_NK", "TK"];
-    const recipient = pickFromDocs(okDocs, candidateKeys);
-    if (recipient?.email) return recipient;
-  }
-
-  const anyRecipient = docs.find((doc) => doc.uploaderEmail);
-  if (anyRecipient?.uploaderEmail) {
-    return {
-      email: anyRecipient.uploaderEmail,
-      name: anyRecipient.uploaderName || buildFallbackName(anyRecipient.uploaderEmail),
-    };
-  }
-
-  return { email: "", name: "" };
 }
 
 export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefresh }: ShipmentDetailModalProps) {
@@ -784,6 +781,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [returnForm, setReturnForm] = useState<ReturnItem | null>(null);
   const [isDetailsEditing, setIsDetailsEditing] = useState(false);
   const [detailForm, setDetailForm] = useState<Record<string, string>>({});
+  const [purchaseDetailForms, setPurchaseDetailForms] = useState<PurchaseDetailWithItems[]>([]);
   const [isSavingDetails, setIsSavingDetails] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const [currentDay] = useState(() => {
@@ -803,6 +801,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isOcrAnalyzing, setIsOcrAnalyzing] = useState(false);
   const [isOcrSaving, setIsOcrSaving] = useState(false);
   const [ocrUploadError, setOcrUploadError] = useState("");
+  const [passingDocumentId, setPassingDocumentId] = useState<string | null>(null);
+  const [locallyPassedDocumentIds, setLocallyPassedDocumentIds] = useState<string[]>([]);
   const [selectedMissingDocIds, setSelectedMissingDocIds] = useState<string[]>([]);
   const [isSendingEmail] = useState(false);
   const [emailSent] = useState(false);
@@ -813,6 +813,33 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     type: "success" | "error";
     message: string;
   } | null>(null);
+  const [documentProgress, setDocumentProgress] = useState<DocumentProgressResponse | null>(null);
+  const [documentProgressError, setDocumentProgressError] = useState("");
+  const [supplierOptions, setSupplierOptions] = useState<SupplierRecord[]>([]);
+  const [carrierOptions, setCarrierOptions] = useState<CarrierRecord[]>([]);
+
+  const resetFilePreview = () => {
+    setPreviewUrl(null);
+    setPreviewName("");
+    setIsPreviewMaximized(false);
+    setIsPreviewCollapsed(false);
+    setLocalUploads({});
+  };
+
+  const handleModalClose = () => {
+    resetFilePreview();
+    onClose();
+  };
+
+  // Modal được giữ mounted giữa các lần chọn đơn, vì vậy phải xóa file của đơn cũ
+  // cả khi đóng modal lẫn khi parent chuyển thẳng sang một shipment khác.
+  useEffect(() => {
+    setPreviewUrl(null);
+    setPreviewName("");
+    setIsPreviewMaximized(false);
+    setIsPreviewCollapsed(false);
+    setLocalUploads({});
+  }, [isOpen, shipment?.id]);
 
   useEffect(() => {
     if (previewUrl) setIsPreviewCollapsed(false);
@@ -829,6 +856,25 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   }, [ocrUploadFile]);
 
   useEffect(() => {
+    if (!ocrUploadDocId) return;
+    const timer = window.setTimeout(() => {
+      const documentType = getOcrDocumentType(ocrUploadDocId);
+      setOcrUploadFields((current) => {
+        if (documentType === "PI") {
+          const supplier = findBestCatalogMatch(current["Nhà cung cấp"], supplierOptions, "ten_ncc");
+          if (supplier) return { ...current, "Nhà cung cấp": supplier.ten_ncc, "XUẤT XỨ": String(supplier.quoc_gia || "") };
+        }
+        if (documentType === "BL") {
+          const carrier = findBestCatalogMatch(current["Hãng tàu"], carrierOptions, "ten_hang_tau");
+          if (carrier) return { ...current, "Hãng tàu": carrier.ten_hang_tau };
+        }
+        return current;
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [carrierOptions, ocrUploadDocId, supplierOptions]);
+
+  useEffect(() => {
     if (activeTab === "journey") {
       setTrackingFeedback(null);
     }
@@ -836,17 +882,34 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   useEffect(() => {
     if (!isOpen || !shipment) return;
+    setDocumentProgress(null);
+    setDocumentProgressError("");
+    setPassingDocumentId(null);
+    setLocallyPassedDocumentIds([]);
     setArchived(null);
     setReturnItem(null);
     setReturnForm(null);
     setIsReturnEditing(false);
     setDetailForm(shipment.summaryFields || {});
+    setPurchaseDetailForms(shipment.database?.details || []);
     setIsDetailsEditing(false);
     setIsReturnLoading(true);
-    void fetchReturnItem(shipment.orderCode)
+    void Promise.all([
+      listDatabaseRows<SupplierRecord>(databaseEndpoints.suppliers),
+      listDatabaseRows<CarrierRecord>(databaseEndpoints.carriers),
+    ]).then(([suppliers, carriers]) => {
+      setSupplierOptions(suppliers);
+      setCarrierOptions(carriers);
+    }).catch(() => {
+      setSupplierOptions([]);
+      setCarrierOptions([]);
+    });
+    const databaseOrderId = shipment.database?.purchase.ma_hop_dong || shipment.orderCode;
+    void fetchReturnItem(databaseOrderId)
       .then((result) => {
-        setReturnItem(result);
-        setReturnForm(result || { ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", xeTai: "", noiLayHang: "", noiTraHang: "", noiHaRong: "", nhapXuat: "" });
+        const displayResult = result ? { ...result, soHd: shipment.orderCode } : null;
+        setReturnItem(displayResult);
+        setReturnForm(displayResult || { idVanChuyen: "", idBlContainer: "", ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", tenTaiXe: "", bienSoXe: "", noiDi: "", idKho: "", tenKho: "", ghiChu: "" });
       })
       .catch(() => {
         setReturnItem(null);
@@ -858,6 +921,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       // Đơn chưa có thư mục lưu trữ có thể được backend trả về dưới dạng lỗi/not found.
       // Đánh dấu là chưa lưu trữ để quyền admin/xnk vẫn hoạt động bình thường.
       .catch(() => setArchived({ success: true, archived: false }));
+    void checkDocumentProgress(shipment.orderCode)
+      .then(setDocumentProgress)
+      .catch((progressError) => {
+        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể kiểm tra tiến độ chứng từ");
+      });
   }, [isOpen, shipment]);
 
   if (!shipment) return null;
@@ -866,6 +934,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const isArchived = archived?.archived === true;
   const archiveStatusResolved = archived !== null;
   const canUploadDocuments = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "uploadDocument");
+  const canPassDocuments = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "passDocument");
   const canArchiveDocuments = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "archiveDocuments");
   const canEditReturnItem = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "editReturnItem");
   const canEditDetails = archiveStatusResolved && !isCancelled && !isArchived && canPerformShipmentAction(user, "editShipmentDetails");
@@ -876,14 +945,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     container: getSummaryValue(summaryFields, ["Số Container", "Mã Container", "Số cont", "Container"]),
     packageCount: getSummaryValue(summaryFields, ["Số kiện hàng", "Số kiện", "Số hộp"]),
     netWeight: getSummaryValue(summaryFields, ["Net weight", "Trọng lượng", "Trọng lượng tịnh"]),
-    grossWeight: getSummaryValue(summaryFields, ["Gross weight", "Trọng lượng cả bì", "Trọng lượng tổng"]),
     goodsValue: getSummaryValue(summaryFields, ["Tiền hàng", "Giá tổng", "Trị giá", "Tổng tiền"]),
     releaseOrder: getSummaryValue(summaryFields, ["Lệnh thả hàng", "Lệnh giao hàng", "Telex", "Telex release"]),
   };
   const etaRemaining = shipment.ata ? null : formatEtaRemaining(shipment.eta, currentDay, language);
   const piDate = getSummaryValue(summaryFields, ["Ngày HĐ PI", "Ngày PI", "PI Date"]);
   const piDateDisplay = piDate ? formatSheetDateOnly(piDate) : "";
-  // Mã đơn đã nằm ở header và ngày PI được đưa lên cạnh mã đơn; dữ liệu gốc trong Sheet vẫn được giữ nguyên.
+  // Mã hợp đồng đã nằm ở header và ngày PI được đưa lên cạnh mã đơn.
   const hiddenDetailFields = new Set(["stt", "sohd", "ordercode", "madonhang", "mapi", "sopi", "ngayhdpi", "ngaypi"]);
   const detailFields = (Object.keys(detailForm).length > 0 ? Object.keys(detailForm) : [...SUMMARY_FIELDS])
     .filter((field) => !hiddenDetailFields.has(normalizeSheetField(field)));
@@ -913,7 +981,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     ...stage,
     label: t(stageLabelKeys[stage.key]),
   }));
-  const hasStageWarning = hasOutOfOrderDocuments(shipment);
+  const hasStageWarning = documentProgress?.isExceeded === true;
   const flowColor = isCancelled
     ? "text-error-600 bg-error-50 dark:bg-error-500/10 dark:text-error-400"
     : shipment.flowStageKey === "delivered"
@@ -928,7 +996,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       : shipment.flowStageKey === "buying"
         ? "bg-amber-500"
         : "bg-blue-light-500";
-  const documentsSorted = [...(shipment.documents || [])].sort((a, b) => {
+  const documentsSorted = [...(shipment.documents || [])].map((document) => (
+    locallyPassedDocumentIds.includes(document.id)
+      ? { ...document, status: "ok" as const, url: undefined, fileId: undefined, note: "Chứng từ đã được PASS" }
+      : document
+  )).sort((a, b) => {
     const orderA = DOCUMENT_DISPLAY_ORDER.indexOf(a.id.toUpperCase());
     const orderB = DOCUMENT_DISPLAY_ORDER.indexOf(b.id.toUpperCase());
     return (orderA < 0 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB < 0 ? Number.MAX_SAFE_INTEGER : orderB);
@@ -947,7 +1019,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const activeStageMessage = activeMissingDocCodes.length > 0
     ? `${t("missing")}: ${activeMissingDocCodes.join(", ")}`
     : t("processing");
-  const selectedMissingIds = selectedMissingDocIds;
   const carrierTrackingLink = findCarrierTrackingLink(shipment.vessel);
   const isEvergreenTracking = carrierTrackingLink?.name === "EVERGREEN";
   const isCkLineTracking = carrierTrackingLink?.name === CK_LINE_CARRIER_CONFIG.name;
@@ -965,6 +1036,15 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     : null;
   const currentOcrDocumentType = ocrUploadDocId ? getOcrDocumentType(ocrUploadDocId) : null;
   const missingOcrFields = getMissingOcrFields(ocrUploadFields, currentOcrDocumentType);
+  if (currentOcrDocumentType === "PI" && !supplierOptions.some((supplier) => supplier.ten_ncc === ocrUploadFields["Nhà cung cấp"])) {
+    if (!missingOcrFields.includes("Nhà cung cấp")) missingOcrFields.push("Nhà cung cấp");
+  }
+  if (currentOcrDocumentType === "BL" && !carrierOptions.some((carrier) => carrier.ten_hang_tau === ocrUploadFields["Hãng tàu"])) {
+    if (!missingOcrFields.includes("Hãng tàu")) missingOcrFields.push("Hãng tàu");
+  }
+  if (currentOcrDocumentType === "BL" && !isDestinationPort(ocrUploadFields["Cảng đến"] || "")) {
+    if (!missingOcrFields.includes("Cảng đến")) missingOcrFields.push("Cảng đến");
+  }
 
   const handleOpenCarrierTracking = async () => {
     if (!carrierTrackingLink?.usesBackendApi || !carrierTrackingUrl) return;
@@ -1037,18 +1117,45 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     }
   };
 
-  const toggleMissingDocument = (docId: string) => {
-    setSelectedMissingDocIds(
-      selectedMissingIds.includes(docId)
-        ? selectedMissingIds.filter((id) => id !== docId)
-        : [...selectedMissingIds, docId]
-    );
-  };
-
   const handlePickUpload = (docId: string) => {
     if (!canUploadDocuments || archived?.archived) return;
     setSelectedMissingDocIds([docId]);
     window.setTimeout(() => document.getElementById("shipment-document-upload")?.click(), 0);
+  };
+
+  const handlePassDocument = async (docId: string) => {
+    if (!canPassDocuments || archived?.archived || passingDocumentId) return;
+    const confirmed = await confirm({
+      title: t("passDocumentTitle"),
+      message: t("passDocumentMessage", { document: docId, orderCode: shipment.orderCode }),
+      confirmText: t("passDocumentAction"),
+      cancelText: t("goBack"),
+    });
+    if (!confirmed) return;
+
+    setPassingDocumentId(docId);
+    try {
+      await passDriveDocument(shipment.orderCode, docId);
+      setLocallyPassedDocumentIds((current) => current.includes(docId) ? current : [...current, docId]);
+      recordActivity(user, {
+        action: "PASS_DOCUMENT",
+        location: `ShipmentDetailModal/Documents/${docId}`,
+        detail: `Đánh dấu PASS chứng từ ${docId} cho đơn ${shipment.orderCode}`,
+      });
+      await onRefresh?.();
+      try {
+        setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
+        setDocumentProgressError("");
+      } catch (progressError) {
+        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
+      }
+      window.dispatchEvent(new Event(NOTIFICATIONS_SYNC_EVENT));
+      notify(t("passDocumentSuccess", { document: docId }), "success");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : t("passDocumentError"), "error");
+    } finally {
+      setPassingDocumentId(null);
+    }
   };
 
   const handleUploadSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1080,7 +1187,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             fileData,
           });
         }
-        await checkDocumentsAndSaveStatus();
         recordActivity(user, {
           action: "UPLOAD_DOCUMENT",
           location: "ShipmentDetailModal/Documents",
@@ -1088,6 +1194,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         });
         setLocalUploads((current) => ({ ...current, [docId]: URL.createObjectURL(files[files.length - 1]) }));
         await onRefresh?.();
+        try {
+          setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
+          setDocumentProgressError("");
+        } catch (progressError) {
+          setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
+        }
         notify(`Đã upload ${files.length} file chứng từ ${docId}`, "success");
         return;
       }
@@ -1098,7 +1210,20 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadFileData(fileData);
       const result = await analyzeDocument({ documentType, file });
       const analyzedFields = result.data && typeof result.data === "object" ? result.data : {};
-      setOcrUploadFields(ensureRequiredOcrFields(analyzedFields, documentType));
+      const normalizedFields = normalizeOcrFields(analyzedFields, documentType);
+      if (normalizedFields["Cảng đến"]) normalizedFields["Cảng đến"] = normalizedFields["Cảng đến"].toUpperCase();
+      if (documentType === "PI") {
+        const supplier = findBestCatalogMatch(normalizedFields["Nhà cung cấp"], supplierOptions, "ten_ncc");
+        if (supplier) {
+          normalizedFields["Nhà cung cấp"] = supplier.ten_ncc;
+          normalizedFields["XUẤT XỨ"] = String(supplier.quoc_gia || "");
+        }
+      }
+      if (documentType === "BL") {
+        const carrier = findBestCatalogMatch(normalizedFields["Hãng tàu"], carrierOptions, "ten_hang_tau");
+        if (carrier) normalizedFields["Hãng tàu"] = carrier.ten_hang_tau;
+      }
+      setOcrUploadFields(normalizedFields);
     } catch (error) {
       setOcrUploadError(error instanceof Error ? error.message : "Không thể upload hoặc phân tích chứng từ");
       setOcrUploadFile(null);
@@ -1138,8 +1263,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       const changedOcrFields = Object.entries(data).filter(([field, nextValue]) => (
         nextValue.trim() !== getOriginalSummaryValue(shipment.summaryFields, field)
       ));
-      await editSummary({ action: "editSummary", orderCode: shipment.orderCode, data });
-      await checkDocumentsAndSaveStatus();
+      if (!shipment.database) throw new Error("Không tìm thấy quan hệ PostgreSQL của đơn hàng");
+      await updatePostgresShipmentFields(shipment.database, data);
       if (changedOcrFields.length > 0) {
         recordActivity(user, {
           action: "UPLOAD_OCR_DOCUMENT",
@@ -1155,6 +1280,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       }
       setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: URL.createObjectURL(ocrUploadFile) }));
       await onRefresh?.();
+      try {
+        setDocumentProgress(await checkDocumentProgress(shipment.orderCode));
+        setDocumentProgressError("");
+      } catch (progressError) {
+        setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
+      }
       setOcrUploadFile(null);
       setOcrUploadDocId(null);
       setOcrUploadFileData("");
@@ -1171,9 +1302,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     if (!canArchiveDocuments || !isDocumentsComplete || archived?.archived || isArchiveLoading) return;
     setIsArchiveLoading(true);
     try {
-      // Đồng bộ lại status trong backend trước khi yêu cầu chuyển hồ sơ.
-      // UI có thể đã đủ 15/15 nhưng cột status trong Sheet Total chưa kịp cập nhật.
-      await checkDocumentsAndSaveStatus();
       await moveCompletedOrder(shipment.orderCode);
       recordActivity(user, {
         action: "ARCHIVE_DOCUMENTS",
@@ -1207,17 +1335,39 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       if (normalizedField === "số hđ" || normalizedField === "stt" || normalizedField === "order_code" || normalizedField === "order code") return;
       if (nextValue !== (shipment.summaryFields?.[field] || "")) data[field] = nextValue;
     });
-    if (Object.keys(data).length === 0) {
+    const changedPurchaseDetails = purchaseDetailForms.filter((draft) => {
+      const original = shipment.database?.details.find((item) => item.id_chi_tiet === draft.id_chi_tiet);
+      return !original || ["ten_hang", "so_kien", "net_weight", "don_gia", "tong_gia"].some((field) => (
+        String(draft[field as keyof PurchaseDetailRecord] ?? "") !== String(original[field as keyof PurchaseDetailRecord] ?? "")
+      ));
+    });
+    if (Object.keys(data).length === 0 && changedPurchaseDetails.length === 0) {
       setIsDetailsEditing(false);
       return;
     }
     setIsSavingDetails(true);
     try {
-      await editSummary({ action: "editSummary", orderCode: shipment.orderCode, data });
+      if (!shipment.database) throw new Error("Không tìm thấy quan hệ PostgreSQL của đơn hàng");
+      await Promise.all([
+        updatePostgresShipmentFields(shipment.database, data),
+        ...changedPurchaseDetails.map((detail) => updateDatabaseRow<PurchaseDetailRecord>(
+          databaseEndpoints.purchaseDetails,
+          detail.id_chi_tiet,
+          {
+            ten_hang: detail.ten_hang,
+            so_kien: detail.so_kien === "" ? null : detail.so_kien,
+            net_weight: detail.net_weight === "" ? null : detail.net_weight,
+            don_gia: detail.don_gia === "" ? null : detail.don_gia,
+            tong_gia: detail.tong_gia === "" ? null : detail.tong_gia,
+          },
+        )),
+      ]);
       recordActivity(user, {
         action: "EDIT_SHIPMENT_DETAILS",
         location: "ShipmentDetailModal/Details",
-        detail: describeFieldChanges(shipment.orderCode, Object.entries(data), shipment.summaryFields),
+        detail: changedPurchaseDetails.length > 0
+          ? `Đơn ${shipment.orderCode}; cập nhật ${changedPurchaseDetails.length} dòng chi tiết mua hàng`
+          : describeFieldChanges(shipment.orderCode, Object.entries(data), shipment.summaryFields),
       });
       await onRefresh?.();
       setIsDetailsEditing(false);
@@ -1233,29 +1383,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     if (!canEditReturnItem || !returnForm || isSavingReturn) return;
     setIsSavingReturn(true);
     try {
-      await editReturnItem({
-        action: "editReturnItem",
-        orderCode: shipment.orderCode,
-        data: {
-          "SỐ HĐ": shipment.orderCode,
-          "NGÀY": returnForm.ngay,
-          "SỐ CONT": returnForm.soCont,
-          "NHÀ XE": returnForm.nhaXe,
-          "XE_TÀI": returnForm.xeTai,
-          "NƠI LẤY HÀNG": returnForm.noiLayHang,
-          "NƠI TRẢ HÀNG": returnForm.noiTraHang,
-          "NƠI HẠ RỖNG": returnForm.noiHaRong,
-          "NHẬP/XUẤT": returnForm.nhapXuat,
-        },
-      });
+      await savePostgresReturnItem(returnForm);
       recordActivity(user, {
         action: "EDIT_RETURN_ITEM",
         location: "ShipmentDetailModal/ReturnItem",
         detail: `Cập nhật hạ rỗng đơn ${shipment.orderCode}`,
       });
-      const refreshed = await fetchReturnItem(shipment.orderCode);
-      setReturnItem(refreshed);
-      setReturnForm(refreshed || returnForm);
+      const refreshed = await fetchReturnItem(shipment.database?.purchase.ma_hop_dong || shipment.orderCode);
+      const displayResult = refreshed ? { ...refreshed, soHd: shipment.orderCode } : null;
+      setReturnItem(displayResult);
+      setReturnForm(displayResult || returnForm);
       setIsReturnEditing(false);
       notify("Đã cập nhật thông tin hạ rỗng", "success");
     } catch (error) {
@@ -1279,11 +1416,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
     setIsCancelling(true);
     try {
-      await editSummary({
-        action: "editSummary",
-        orderCode: shipment.orderCode,
-        data: { "Trạng thái": "Hủy" },
-      });
+      await cancelPostgresShipment(shipment.database?.purchase.ma_hop_dong || shipment.orderCode);
       recordActivity(user, {
         action: "CANCEL_SHIPMENT",
         location: "ShipmentDetailModal/Details",
@@ -1291,7 +1424,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       });
       await onRefresh?.();
       notify(`Đã chuyển đơn ${shipment.orderCode} sang trạng thái Hủy`, "success");
-      onClose();
+      handleModalClose();
     } catch (error) {
       notify(error instanceof Error ? error.message : "Không thể cập nhật trạng thái đơn hàng", "error");
     } finally {
@@ -1301,7 +1434,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
   return (
     <>
-    <Modal isOpen={isOpen} onClose={onClose} className="mx-2 my-2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl flex-col overflow-hidden sm:mx-4 sm:my-4 sm:max-h-[94vh] sm:w-full">
+    <Modal
+      isOpen={isOpen}
+      onClose={handleModalClose}
+      contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
+      className={`mx-2 my-2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl flex-col overflow-hidden transition-[width,transform] duration-300 sm:mx-4 sm:my-4 sm:max-h-[94vh] sm:w-full ${previewUrl && !isPreviewCollapsed && !isPreviewMaximized ? "md:w-[calc(50vw-1.5rem)] md:max-w-none md:-translate-x-1/2" : ""}`}
+    >
       {/* Header */}
       <div className="flex flex-col gap-3 border-b border-gray-100 px-4 pb-4 pt-5 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pb-4 sm:pt-6">
         <div className="min-w-0 flex flex-col gap-1 pr-10 sm:pr-0">
@@ -1318,11 +1456,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
               {t("piDate")}: <span className="font-semibold text-gray-700 dark:text-gray-200">{piDateDisplay}</span>
             </p>
-          )}
-          {shipment.soldAtSea && (
-            <span className="text-xs font-semibold text-success-600 dark:text-success-400">
-              {t("soldAtSea")}
-            </span>
           )}
           <p className="break-words text-sm text-gray-500 dark:text-gray-400">{shipment.shipName}</p>
           <p className="break-words text-xs text-gray-400">{t("supplierPrefix", { supplier: shipment.supplier })}</p>
@@ -1367,7 +1500,23 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             </p>
             {ocrUploadFile && !isOcrAnalyzing && (
               <>
-                <p className="mt-1 text-xs text-gray-500">{t("fileAndOrder", { file: ocrUploadFile.name, orderCode: shipment.orderCode })}</p>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <p className="min-w-0 break-words text-xs text-gray-500">{t("fileAndOrder", { file: ocrUploadFile.name, orderCode: shipment.orderCode })}</p>
+                  <button
+                    type="button"
+                    disabled={!ocrFilePreviewUrl}
+                    onClick={() => {
+                      if (!ocrUploadDocId || !ocrFilePreviewUrl) return;
+                      setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: ocrFilePreviewUrl }));
+                      setPreviewUrl(ocrFilePreviewUrl);
+                      setPreviewName(ocrUploadFile.name);
+                      setIsPreviewCollapsed(false);
+                    }}
+                    className="shrink-0 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20"
+                  >
+                    {t("viewDocument")}
+                  </button>
+                </div>
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                     {Object.entries(ocrUploadFields || {}).filter(([key]) => !key.startsWith("_")).map(([key, value]) => (
                       <label key={key} className="flex flex-col gap-1 text-xs font-medium text-gray-600 dark:text-gray-300">
@@ -1377,7 +1526,38 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                             <span className="text-error-500"> *</span>
                           )}
                         </span>
-                        <input type="text" value={value} onChange={(event) => setOcrUploadFields((current) => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                        {normalizeSheetField(key) === normalizeSheetField("Nhà cung cấp") ? (
+                          <select
+                            value={value}
+                            onChange={(event) => {
+                              const supplier = supplierOptions.find((item) => item.ten_ncc === event.target.value);
+                              setOcrUploadFields((current) => ({
+                                ...current,
+                                [key]: event.target.value,
+                                "XUẤT XỨ": String(supplier?.quoc_gia || ""),
+                              }));
+                            }}
+                            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                          >
+                            <option value="">Chọn nhà cung cấp</option>
+                            {value && !supplierOptions.some((supplier) => normalizeCatalogText(supplier.ten_ncc) === normalizeCatalogText(value)) && <option value={value} disabled>OCR chưa khớp: {value}</option>}
+                            {supplierOptions.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.ten_ncc}</option>)}
+                          </select>
+                        ) : normalizeSheetField(key) === normalizeSheetField("Hãng tàu") ? (
+                          <select value={value} onChange={(event) => setOcrUploadFields((current) => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+                            <option value="">Chọn hãng tàu</option>
+                            {value && !carrierOptions.some((carrier) => normalizeCatalogText(carrier.ten_hang_tau) === normalizeCatalogText(value)) && <option value={value} disabled>OCR chưa khớp: {value}</option>}
+                            {carrierOptions.map((carrier) => <option key={carrier.id_hang_tau} value={carrier.ten_hang_tau}>{carrier.ten_hang_tau}</option>)}
+                          </select>
+                        ) : normalizeSheetField(key) === normalizeSheetField("Cảng đến") ? (
+                          <select value={value} onChange={(event) => setOcrUploadFields((current) => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+                            <option value="">Chọn cảng đến</option>
+                            {value && !isDestinationPort(value) && <option value={value} disabled>OCR chưa khớp: {value}</option>}
+                            {DESTINATION_PORT_OPTIONS.map((port) => <option key={port} value={port}>{port}</option>)}
+                          </select>
+                        ) : (
+                          <input type="text" value={value} readOnly={normalizeSheetField(key) === normalizeSheetField("XUẤT XỨ")} onChange={(event) => setOcrUploadFields((current) => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 outline-none focus:border-brand-500 read-only:cursor-not-allowed read-only:bg-gray-100 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:read-only:bg-gray-800" />
+                        )}
                       </label>
                     ))}
                 </div>
@@ -1389,7 +1569,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
                 <div className="mt-4 flex flex-wrap justify-end gap-2">
                   <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadFields({}); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
-                  <button type="button" onClick={() => { if (ocrUploadDocId && ocrFilePreviewUrl) { setLocalUploads((current) => ({ ...current, [ocrUploadDocId]: ocrFilePreviewUrl })); setPreviewUrl(ocrFilePreviewUrl); setPreviewName(ocrUploadFile.name); } setActiveTab("documents"); }} className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300 dark:hover:bg-brand-500/20">{t("viewDocument")}</button>
                   <button type="button" onClick={handleConfirmOcrUpload} disabled={!canUploadDocuments || isOcrSaving || missingOcrFields.length > 0} title={missingOcrFields.length > 0 ? t("requiredMissing", { fields: missingOcrFields.map((field) => localizeSheetField(field, t)).join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? t("saving") : t("confirmSave")}</button>
                 </div>
               </>
@@ -1410,7 +1589,6 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <InfoRow label={t("invoiceNumber")} value={overviewInfo.invoice || t("notAvailable")} mono />
                   <InfoRow label={t("packageCount")} value={overviewInfo.packageCount || t("notAvailable")} />
                   <InfoRow label="Net weight" value={overviewInfo.netWeight || "Chưa có"} />
-                  <InfoRow label="Gross weight" value={overviewInfo.grossWeight || "Chưa có"} />
                   <InfoRow label={t("goodsValue")} value={overviewInfo.goodsValue || t("notAvailable")} />
                 </div>
               </div>
@@ -1421,7 +1599,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <InfoRow label={t("carrier")} value={shipment.vessel || t("notAvailable")} />
                   <InfoRow label="Bill of Lading" value={shipment.bill || t("notAvailable")} mono />
                   <InfoRow label={t("destinationPort")} value={shipment.port || t("notAvailable")} />
-                  <InfoRow label={t("releaseOrder")} value={overviewInfo.releaseOrder || shipment.telex || t("notAvailable")} />
+                  <InfoRow label={t("releaseOrder")} value={overviewInfo.releaseOrder || t("notAvailable")} />
                 </div>
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
@@ -1439,15 +1617,28 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             </div>
 
             {!isCancelled && (
-              <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
-                <ShipmentStatusBar
-                  activeStage={shipment.flowStageKey || "buying"}
-                  stages={localizedFlowStages}
-                  isLate={shipment.flowStageLate}
-                  hasOutOfOrderDocs={hasStageWarning}
-                  activeStageMessage={activeStageMessage}
-                />
-              </div>
+              <>
+                {hasStageWarning && documentProgress && (
+                  <div className="rounded-xl border border-warning-300 bg-warning-50 p-4 text-sm text-warning-800 dark:border-warning-500/40 dark:bg-warning-500/10 dark:text-warning-300">
+                    <p className="font-semibold">{t("routeWarning")}</p>
+                    <p className="mt-1">{documentProgress.currentStageLabel}</p>
+                    <p className="mt-1">{t("missing")}: {(documentProgress.missingDocuments || []).join(", ") || "—"}</p>
+                    <p className="mt-1">{t("exceededDocuments")}: {(documentProgress.exceededDocuments || []).join(", ") || "—"}</p>
+                  </div>
+                )}
+                {documentProgressError && (
+                  <div className="rounded-xl border border-error-200 bg-error-50 p-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
+                    {documentProgressError}
+                  </div>
+                )}
+                <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
+                  <ShipmentStatusBar
+                    activeStage={shipment.flowStageKey || "buying"}
+                    stages={localizedFlowStages}
+                    activeStageMessage={activeStageMessage}
+                  />
+                </div>
+              </>
             )}
 
             {/* Docs summary */}
@@ -1627,7 +1818,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               <div className="flex flex-col gap-3">
                 {shipment.timeline.map((stage, idx) => (
                   <div
-                    key={stage.id}
+                    key={stage.id || `timeline-stage-${idx}`}
                     className={`flex min-w-0 gap-3 rounded-xl border p-3 transition-all sm:gap-4 sm:p-4 ${
                       stage.isCompleted
                         ? "border-success-100 bg-success-50/50 dark:border-success-500/20 dark:bg-success-500/5"
@@ -1763,6 +1954,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             <div className="max-h-[320px] overflow-y-auto pr-1 custom-scrollbar flex flex-col gap-2">
               {documentsSorted.map(doc => {
                 const docStatus = DOC_STATUS_MAP[doc.status];
+                const isPassed = doc.note?.toUpperCase().includes("PASS") === true;
                 return (
                   <div
                     key={doc.id}
@@ -1797,12 +1989,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <span className={`flex items-center gap-1 text-xs font-semibold ${docStatus?.color}`}>
                         <span className={`w-1.5 h-1.5 rounded-full ${docStatus?.dot}`} />
-                        {t({ ok: "available", missing: "missing", pending: "pending", expired: "expired" }[doc.status] || "status")}
+                        {isPassed ? t("passed") : t({ ok: "available", missing: "missing", pending: "pending", expired: "expired" }[doc.status] || "status")}
                       </span>
                       {(doc.url || localUploads[doc.id]) && (
                         <button
                           type="button"
-                          onClick={() => { setPreviewUrl(localUploads[doc.id] || doc.url || null); setPreviewName(doc.name); }}
+                          onClick={() => {
+                            const sourceUrl = localUploads[doc.id] || doc.url;
+                            setPreviewUrl(sourceUrl ? toDocumentPreviewUrl(sourceUrl) : null);
+                            setPreviewName(doc.name);
+                          }}
                           className="flex items-center justify-center w-7 h-7 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors"
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500">
@@ -1815,6 +2011,16 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       {!archived?.archived && canUploadDocuments && (
                         <button type="button" disabled={isOcrAnalyzing || isOcrSaving} onClick={() => handlePickUpload(doc.id)} className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand-600 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">
                           {isOcrAnalyzing && ocrUploadDocId === doc.id ? t("analyzingDocument") : doc.status === "ok" ? t("uploadAnother") : localUploads[doc.id] ? t("uploadAnother") : t("uploadDocument")}
+                        </button>
+                      )}
+                      {!archived?.archived && canPassDocuments && doc.status !== "ok" && (
+                        <button
+                          type="button"
+                          disabled={Boolean(passingDocumentId) || isOcrAnalyzing || isOcrSaving}
+                          onClick={() => void handlePassDocument(doc.id)}
+                          className="rounded-lg border border-success-200 bg-success-50 px-2 py-1 text-[11px] font-semibold text-success-700 hover:bg-success-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-success-500/30 dark:bg-success-500/10 dark:text-success-300"
+                        >
+                          {passingDocumentId === doc.id ? t("passingDocument") : t("passDocument")}
                         </button>
                       )}
                     </div>
@@ -1869,7 +2075,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                       {RETURN_FIELD_GROUPS[0].fields.map(({ key, labelKey }) => (
                         <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                           <span>{t(labelKey)}</span>
-                          <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "soHd"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                          <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "soHd" || key === "soCont"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm font-medium text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                         </label>
                       ))}
                     </div>
@@ -1885,7 +2091,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     {RETURN_FIELD_GROUPS[1].fields.map(({ key, labelKey }, index) => (
                       <label key={key} className="relative flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                         <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-brand-400" />{t(labelKey)}</span>
-                        <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                        <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "tenKho"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
                         {index < RETURN_FIELD_GROUPS[1].fields.length - 1 && <span className="absolute -right-2 top-[2.4rem] hidden text-gray-300 md:block"></span>}
                       </label>
                     ))}
@@ -1910,7 +2116,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             )}
             {canEditReturnItem && isReturnEditing && (
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => { setReturnForm(returnItem || { ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", xeTai: "", noiLayHang: "", noiTraHang: "", noiHaRong: "", nhapXuat: "" }); setIsReturnEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
+                <button type="button" onClick={() => { setReturnForm(returnItem || { idVanChuyen: "", idBlContainer: "", ngay: "", soCont: "", soHd: shipment.orderCode, nhaXe: "", tenTaiXe: "", bienSoXe: "", noiDi: "", idKho: "", tenKho: "", ghiChu: "" }); setIsReturnEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
                 <button type="button" onClick={handleSaveReturn} disabled={isSavingReturn} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingReturn ? t("saving") : t("save")}</button>
               </div>
             )}
@@ -1944,7 +2150,18 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               )}
             </div>
             <div className="grid gap-5">
-              {groupedDetailFields.map((group) => (
+              {groupedDetailFields.map((group) => group.key === "orderDetails" && shipment.database ? (
+                <PurchaseDetailsTable
+                  key={group.key}
+                  group={group}
+                  details={purchaseDetailForms}
+                  editing={canEditDetails && isDetailsEditing}
+                  translate={t}
+                  onChange={(id, field, value) => setPurchaseDetailForms((current) => current.map((detail) => (
+                    detail.id_chi_tiet === id ? { ...detail, [field]: value } : detail
+                  )))}
+                />
+              ) : (
                 <section
                   key={group.key}
                   className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]"
@@ -1974,12 +2191,44 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           <label htmlFor={inputId} className="truncate text-xs font-semibold text-gray-600 dark:text-gray-300">
                             {labelKey ? t(labelKey) : localizeSheetField(field, t)}
                           </label>
-                          {isDateDetailField(field) ? (
+                          {normalizeSheetField(field) === normalizeSheetField("Nhà cung cấp") ? (
+                            <select
+                              id={inputId}
+                              value={detailForm[field] || ""}
+                              disabled={!canEditDetails || !isDetailsEditing}
+                              onChange={(event) => {
+                                const supplier = supplierOptions.find((item) => item.ten_ncc === event.target.value);
+                                const originField = findActualSheetField(Object.keys(detailForm), "XUẤT XỨ");
+                                setDetailForm((current) => ({
+                                  ...current,
+                                  [field]: event.target.value,
+                                  [originField]: String(supplier?.quoc_gia || ""),
+                                }));
+                              }}
+                              className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                            >
+                              <option value="">Chọn nhà cung cấp</option>
+                              {detailForm[field] && !supplierOptions.some((supplier) => supplier.ten_ncc === detailForm[field]) && <option value={detailForm[field]}>{detailForm[field]}</option>}
+                              {supplierOptions.map((supplier) => <option key={supplier.id_ncc} value={supplier.ten_ncc}>{supplier.ten_ncc}</option>)}
+                            </select>
+                          ) : normalizeSheetField(field) === normalizeSheetField("Hãng tàu") ? (
+                            <select id={inputId} value={detailForm[field] || ""} disabled={!canEditDetails || !isDetailsEditing} onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))} className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+                              <option value="">Chọn hãng tàu</option>
+                              {detailForm[field] && !carrierOptions.some((carrier) => carrier.ten_hang_tau === detailForm[field]) && <option value={detailForm[field]}>{detailForm[field]}</option>}
+                              {carrierOptions.map((carrier) => <option key={carrier.id_hang_tau} value={carrier.ten_hang_tau}>{carrier.ten_hang_tau}</option>)}
+                            </select>
+                          ) : normalizeSheetField(field) === normalizeSheetField("Cảng đến") ? (
+                            <select id={inputId} value={isDestinationPort(detailForm[field] || "") ? detailForm[field].trim().toUpperCase() : detailForm[field] || ""} disabled={!canEditDetails || !isDetailsEditing} onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))} className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white">
+                              <option value="">Chọn cảng đến</option>
+                              {detailForm[field] && !isDestinationPort(detailForm[field]) && <option value={detailForm[field]} disabled>{detailForm[field]}</option>}
+                              {DESTINATION_PORT_OPTIONS.map((port) => <option key={port} value={port}>{port}</option>)}
+                            </select>
+                          ) : isDateDetailField(field) ? (
                             <DateFieldInput
                               id={inputId}
                               label={field}
                               value={detailForm[field]}
-                              disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field)}
+                              disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field) || isDatabaseReadOnlyField(group.key, field)}
                               onChange={(value) => setDetailForm((current) => ({ ...current, [field]: value }))}
                             />
                           ) : (
@@ -1987,7 +2236,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                               id={inputId}
                               type="text"
                               value={detailForm[field] || ""}
-                              disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field)}
+                              disabled={!canEditDetails || !isDetailsEditing || isReadOnlyDetailField(field) || isDatabaseReadOnlyField(group.key, field)}
                               onChange={(event) => setDetailForm((current) => ({ ...current, [field]: event.target.value }))}
                               className="h-10 rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm font-normal text-gray-800 outline-none transition-colors focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-500/10 disabled:cursor-not-allowed disabled:opacity-75 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:focus:border-brand-500"
                             />
@@ -2002,7 +2251,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             </div>
             {canEditDetails && isDetailsEditing && (
               <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => { setDetailForm(shipment.summaryFields || {}); setIsDetailsEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
+                <button type="button" onClick={() => { setDetailForm(shipment.summaryFields || {}); setPurchaseDetailForms(shipment.database?.details || []); setIsDetailsEditing(false); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300">{t("cancel")}</button>
                 <button type="button" onClick={handleSaveDetails} disabled={isSavingDetails} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isSavingDetails ? t("saving") : t("save")}</button>
               </div>
             )}
@@ -2047,8 +2296,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
               {archived?.files && archived.files.length > 0 && (
                 <div className="mt-4 flex flex-col gap-2">
-                  {archived.files.map((file) => (
-                    <button key={file.fileId} type="button" onClick={() => { setPreviewUrl(file.fileUrl); setPreviewName(file.fileName); }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                  {archived.files.map((file, fileIndex) => (
+                    <button key={file.fileId || file.fileUrl || `${file.fileName}-${fileIndex}`} type="button" onClick={() => { setPreviewUrl(toDocumentPreviewUrl(file.fileUrl)); setPreviewName(file.fileName); }} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
                       {file.fileName}
                     </button>
                   ))}
@@ -2085,21 +2334,25 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       </div>
     </Modal>
       {previewUrl && !isPreviewCollapsed && (
-        <aside className={`fixed right-0 top-0 z-[100000] flex h-screen flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isPreviewMaximized ? "w-full" : "w-[min(92vw,620px)]"}`}>
+        <aside className={`fixed right-0 top-0 z-[100000] flex h-screen min-h-0 flex-col border-l border-gray-200 bg-white shadow-2xl transition-all duration-300 dark:border-gray-700 dark:bg-gray-900 ${isPreviewMaximized ? "w-full" : "w-[92vw] md:w-1/2"}`}>
           <div className="flex h-14 flex-shrink-0 items-center gap-3 border-b border-gray-200 px-4 dark:border-gray-700">
             <p className="min-w-0 flex-1 truncate text-sm font-semibold text-gray-800 dark:text-white">{previewName}</p>
             <button type="button" onClick={() => setIsPreviewMaximized((current) => !current)} className="rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" title={isPreviewMaximized ? t("minimize") : t("maximize")}>
               {isPreviewMaximized ? t("minimize") : t("maximize")}
             </button>
-            <button type="button" onClick={() => setIsPreviewCollapsed(true)} className="rounded-lg px-2 text-xl leading-none text-gray-500 hover:bg-gray-100 hover:text-gray-800 dark:hover:bg-gray-800 dark:hover:text-white" aria-label={t("collapsePreview")}>→</button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
-            <iframe title={previewName} src={previewUrl} className="h-full min-h-[calc(100vh-5rem)] w-full rounded-lg bg-white" />
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-gray-100 p-2 custom-scrollbar dark:bg-gray-950">
+            <iframe title={previewName} src={previewUrl} className="block h-[calc(100vh-4.5rem)] min-h-[720px] w-full rounded-lg bg-white" />
           </div>
         </aside>
       )}
+      {previewUrl && !isPreviewCollapsed && (
+        <button type="button" onClick={() => setIsPreviewCollapsed(true)} className="fixed right-0 top-1/2 z-[100001] -translate-y-1/2 rounded-l-xl border border-r-0 border-brand-200 bg-brand-500 px-3 py-4 text-sm font-semibold text-white shadow-lg hover:bg-brand-600" aria-label={t("collapsePreview")}>
+          → File
+        </button>
+      )}
       {previewUrl && isPreviewCollapsed && (
-        <button type="button" onClick={() => setIsPreviewCollapsed(false)} className="fixed right-0 top-1/2 z-[100000] rounded-l-xl border border-r-0 border-brand-200 bg-brand-500 px-3 py-4 text-sm font-semibold text-white shadow-lg hover:bg-brand-600" aria-label={t("openPreview")}>
+        <button type="button" onClick={() => setIsPreviewCollapsed(false)} className="fixed right-0 top-1/2 z-[100000] -translate-y-1/2 rounded-l-xl border border-r-0 border-brand-200 bg-brand-500 px-3 py-4 text-sm font-semibold text-white shadow-lg hover:bg-brand-600" aria-label={t("openPreview")}>
           ← File
         </button>
       )}
