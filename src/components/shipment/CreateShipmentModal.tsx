@@ -329,7 +329,6 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     ["totalPrice", "Giá tổng"],
     ["unitPrice", "Đơn giá"],
     ["itemCode", "Item code"],
-    ["factoryCode", "Mã nhà máy"],
   ];
 
   return (
