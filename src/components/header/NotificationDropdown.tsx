@@ -110,11 +110,11 @@ function isUnread(item: NotificationItem): boolean {
   return item.status === "0";
 }
 
-function formatTime(value: string): string {
+function formatTime(value: string, language: "vi" | "en"): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("vi-VN", {
+  return date.toLocaleString(language === "en" ? "en-GB" : "vi-VN", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -133,7 +133,7 @@ function badgeTone(kind: NotificationKind): string {
 }
 
 export default function NotificationDropdown() {
-  const { t } = useLanguage();
+  const { language, t } = useLanguage();
   const [isOpen, setIsOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -156,21 +156,21 @@ export default function NotificationDropdown() {
       applyRows(rows as NotificationRow[], announce);
     } catch (refreshError) {
       setLoading(false);
-      setError(refreshError instanceof Error ? refreshError.message : "Không thể tải thông báo");
+      setError(refreshError instanceof Error ? refreshError.message : t("loadingNotifications"));
     }
-  }, [applyRows]);
+  }, [applyRows, t]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refreshNotifications(), 0);
     return () => window.clearTimeout(timer);
-  }, [refreshNotifications]);
+  }, [refreshNotifications, t]);
 
   useEffect(() => {
     const handleUploadSync = () => void refreshNotifications(true);
 
     window.addEventListener(NOTIFICATIONS_SYNC_EVENT, handleUploadSync);
     return () => window.removeEventListener(NOTIFICATIONS_SYNC_EVENT, handleUploadSync);
-  }, [refreshNotifications]);
+  }, [refreshNotifications, t]);
 
   const latestThree = useMemo(() => notifications.slice(0, 3), [notifications]);
   const unreadCount = useMemo(() => notifications.filter(isUnread).length, [notifications]);
@@ -186,11 +186,11 @@ export default function NotificationDropdown() {
       if (unreadIds.length > 0) await markNotificationsRead(unreadIds);
       await refreshNotifications();
     } catch (markError) {
-      setError(markError instanceof Error ? markError.message : "Không thể cập nhật trạng thái thông báo đã đọc");
+      setError(markError instanceof Error ? markError.message : t("markReadError"));
     } finally {
       markingReadRef.current = false;
     }
-  }, [refreshNotifications]);
+  }, [refreshNotifications, t]);
 
   const handleToggle = () => {
     const willOpen = !isOpen;
@@ -214,12 +214,12 @@ export default function NotificationDropdown() {
         <span className="mb-1 block text-sm font-medium text-gray-800 dark:text-white/90">{item.title}</span>
         <span className={`block text-xs text-gray-500 dark:text-gray-400 ${compact ? "line-clamp-2" : ""}`}>{item.body}</span>
         {item.updatedBy && !compact && (
-          <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-400">Giai đoạn: {item.updatedBy}</span>
+          <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-400">{t("notificationStage", { stage: item.updatedBy })}</span>
         )}
         <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
           <span className="font-medium text-gray-600 dark:text-gray-300">{item.orderCode || "—"}</span>
           <span className="h-1 w-1 rounded-full bg-gray-400" />
-          <span>{formatTime(item.time)}</span>
+          <span>{formatTime(item.time, language)}</span>
         </span>
       </span>
     </div>
@@ -247,19 +247,19 @@ export default function NotificationDropdown() {
         <div className="mb-3 flex items-center justify-between border-b border-gray-100 pb-3 dark:border-gray-700">
           <div>
             <h5 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{t("notifications")}</h5>
-            <p className="text-xs text-gray-500 dark:text-gray-400">{unreadCount} thông báo chưa đọc</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{t("unreadNotifications", { count: unreadCount })}</p>
           </div>
-          <button type="button" onClick={() => setIsOpen(false)} aria-label="Đóng thông báo" className="text-2xl leading-none text-gray-500 hover:text-gray-700 dark:text-gray-400">×</button>
+          <button type="button" onClick={() => setIsOpen(false)} aria-label={t("closeNotifications")} className="text-2xl leading-none text-gray-500 hover:text-gray-700 dark:text-gray-400">×</button>
         </div>
 
         <div className="max-h-[420px] overflow-y-auto custom-scrollbar">
-          {hasNewNotification && <div className="mb-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">Có thông báo mới từ lần upload gần nhất.</div>}
+          {hasNewNotification && <div className="mb-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">{t("newUploadNotification")}</div>}
           {error && <div className="mb-2 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-xs font-medium text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">{error}</div>}
 
           {loading ? (
-            <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500 dark:bg-white/[0.02] dark:text-gray-400">Đang tải thông báo...</div>
+            <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500 dark:bg-white/[0.02] dark:text-gray-400">{t("loadingNotifications")}</div>
           ) : latestThree.length === 0 ? (
-            <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500 dark:bg-white/[0.02] dark:text-gray-400">Chưa có thông báo.</div>
+            <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-500 dark:bg-white/[0.02] dark:text-gray-400">{t("noNotifications")}</div>
           ) : (
             <div className="flex flex-col gap-2">
               {latestThree.map((item, index) => (
@@ -280,8 +280,8 @@ export default function NotificationDropdown() {
 
       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} className="mx-4 my-4 flex max-h-[90vh] max-w-3xl flex-col overflow-hidden">
         <div className="border-b border-gray-100 px-6 pb-4 pt-6 dark:border-gray-800">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Tất cả thông báo</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{notifications.length} thông báo từ hệ thống</p>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("allNotifications")}</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t("systemNotificationCount", { count: notifications.length })}</p>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 custom-scrollbar">
           {error && (
@@ -292,7 +292,7 @@ export default function NotificationDropdown() {
           <div className="flex flex-col gap-2">
             {notifications.length > 0
               ? notifications.map((item, index) => renderNotification(item, index))
-              : <p className="py-8 text-center text-sm text-gray-400">Chưa có thông báo.</p>}
+              : <p className="py-8 text-center text-sm text-gray-400">{t("noNotifications")}</p>}
           </div>
         </div>
       </Modal>

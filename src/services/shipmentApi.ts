@@ -10,7 +10,7 @@ import { getStoredUser } from "@/services/authApi";
 import {
   fetchDriveDocumentRows,
   fetchNotificationRows,
-  fetchPostgresReturnItem,
+  fetchPostgresReturnItems,
   fetchPostgresShipmentListSnapshot,
   databaseEndpoints,
   updateDatabaseRow,
@@ -283,8 +283,8 @@ function mapPostgresShipment(
   };
 }
 
-export async function fetchReturnItem(orderCode: string): Promise<ReturnItem | null> {
-  return fetchPostgresReturnItem(orderCode);
+export async function fetchReturnItems(orderCode: string): Promise<ReturnItem[]> {
+  return fetchPostgresReturnItems(orderCode);
 }
 
 export function getNotifications(): Promise<NotificationRecord[]> {
@@ -367,22 +367,28 @@ export function launchCKLineTracking(code: string): Promise<CKLineTrackingLaunch
   });
 }
 
-export interface AnalyzeDocumentResponse { success: boolean; documentType: "PI" | "INV" | "PKL" | "BL"; fileName: string; data: Record<string, string>; _confidence?: number; ocrConfidence?: number; _reason?: string; models?: Record<string, string>; }
+export type OcrDataRow = Record<string, string>;
+export interface AnalyzeDocumentResponse { success: boolean; documentType: "PI" | "INV" | "PKL" | "BL"; fileName: string; data: OcrDataRow[]; _confidence?: number; ocrConfidence?: number; _reason?: string; models?: Record<string, string>; }
 export async function analyzeDocument(payload: { documentType: "PI" | "INV" | "PKL" | "BL"; file: File }): Promise<AnalyzeDocumentResponse> {
   const formData = new FormData();
   formData.append("documentType", payload.documentType);
   formData.append("file", payload.file, payload.file.name);
-  const response = await requestJson<AnalyzeDocumentResponse | Record<string, unknown>>("ocr/analyze", { method: "POST", body: formData });
-  const raw = response && typeof response === "object" ? response : {};
-  const nestedData = raw.data && typeof raw.data === "object" && !Array.isArray(raw.data)
-    ? raw.data
-    : raw;
-  const data = Object.fromEntries(
-    Object.entries(nestedData).map(([key, value]) => [key, value == null ? "" : String(value)]),
-  );
-
-  // requestJson đã tự unwrap json.data. Chuẩn hóa lại để các modal luôn nhận
-  // được đúng dạng { success, documentType, fileName, data }.
+  const response = await requestJson<unknown>("ocr/analyze", { method: "POST", body: formData });
+  const raw = response && typeof response === "object" && !Array.isArray(response)
+    ? response as Record<string, unknown>
+    : {};
+  // requestJson có thể đã unwrap thuộc tính data. Hỗ trợ cả response mới dạng mảng
+  // và object một dòng cũ, nhưng component luôn nhận một mảng.
+  const sourceRows = Array.isArray(response)
+    ? response
+    : Array.isArray(raw.data)
+      ? raw.data
+      : [raw.data && typeof raw.data === "object" ? raw.data : raw];
+  const data = sourceRows
+    .filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row))
+    .map((row) => Object.fromEntries(
+      Object.entries(row).map(([key, value]) => [key, value == null ? "" : String(value)]),
+    ));
   return {
     success: raw.success !== false,
     documentType: raw.documentType === "PI" || raw.documentType === "INV" || raw.documentType === "PKL" || raw.documentType === "BL"

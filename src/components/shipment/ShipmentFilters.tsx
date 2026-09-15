@@ -181,7 +181,7 @@ export default function ShipmentFilters({
             />
             <button
               type="button"
-              aria-label="Chọn ngày bắt đầu"
+              aria-label={t("chooseStartDate")}
               onClick={() => openDatePicker(document.getElementById("filter-date-from") as HTMLInputElement | null)}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-gray-700"
             >
@@ -203,7 +203,7 @@ export default function ShipmentFilters({
             />
             <button
               type="button"
-              aria-label="Chọn ngày kết thúc"
+              aria-label={t("chooseEndDate")}
               onClick={() => openDatePicker(document.getElementById("filter-date-to") as HTMLInputElement | null)}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-gray-700"
             >

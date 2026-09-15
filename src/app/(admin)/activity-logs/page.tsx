@@ -5,31 +5,32 @@ import { useAuth } from "@/context/AuthContext";
 import { getActivityLogs, type ActivityLog } from "@/services/activityLogApi";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLanguage } from "@/context/LanguageContext";
 
 const PAGE_SIZE = 10;
 
-const ACTION_LABELS: Record<string, string> = {
-  CREATE_SHIPMENT: "Tạo đơn hàng",
-  UPLOAD_DOCUMENT: "Upload chứng từ",
-  ARCHIVE_DOCUMENTS: "Lưu trữ chứng từ",
-  EDIT_RETURN_ITEM: "Sửa thông tin hạ rỗng",
-  EDIT_SHIPMENT_DETAILS: "Sửa chi tiết đơn hàng",
-  CANCEL_SHIPMENT: "Hủy đơn hàng",
-  REGISTER_USER: "Đăng ký tài khoản",
-  UPDATE_USER_PERMISSION: "Sửa quyền tài khoản",
-  UPDATE_USER_PASSWORD: "Đặt lại mật khẩu",
+const ACTION_LABEL_KEYS: Record<string, string> = {
+  CREATE_SHIPMENT: "logCreateShipment",
+  UPLOAD_DOCUMENT: "logUploadDocument",
+  ARCHIVE_DOCUMENTS: "logArchiveDocuments",
+  EDIT_RETURN_ITEM: "logEditContainerTransport",
+  EDIT_SHIPMENT_DETAILS: "logEditShipmentDetails",
+  CANCEL_SHIPMENT: "logCancelShipment",
+  REGISTER_USER: "logRegisterUser",
+  UPDATE_USER_PERMISSION: "logUpdatePermission",
+  UPDATE_USER_PASSWORD: "logResetPassword",
 };
 
-function getActionLabel(action: string): string {
+function getActionLabel(action: string, translate: (key: string) => string): string {
   const normalized = action.trim().toUpperCase();
-  return ACTION_LABELS[normalized] || action || "Không xác định";
+  return ACTION_LABEL_KEYS[normalized] ? translate(ACTION_LABEL_KEYS[normalized]) : action || translate("unknown");
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, language: "vi" | "en"): string {
   if (!value) return "—";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("vi-VN", {
+  return date.toLocaleString(language === "en" ? "en-GB" : "vi-VN", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -60,6 +61,7 @@ function getPageNumbers(currentPage: number, totalPages: number): Array<number |
 
 export default function ActivityLogsPage() {
   const { user } = useAuth();
+  const { language, t } = useLanguage();
   const router = useRouter();
   const canViewLogs = canPerformShipmentAction(user, "viewActivityLogs");
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -75,11 +77,11 @@ export default function ActivityLogsPage() {
     try {
       setLogs(await getActivityLogs());
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Không thể tải nhật ký hoạt động");
+      setError(loadError instanceof Error ? loadError.message : t("activityLogLoadError"));
     } finally {
       setLoading(false);
     }
-  }, [canViewLogs]);
+  }, [canViewLogs, t]);
 
   useEffect(() => {
     if (!canViewLogs) {
@@ -93,12 +95,12 @@ export default function ActivityLogsPage() {
     const keyword = query.trim().toLocaleLowerCase("vi");
     if (!keyword) return logs;
     return logs.filter((log) =>
-      [getActor(log), log.role, log.session, log.action, getActionLabel(log.action), log.location, log.detail]
+      [getActor(log), log.role, log.session, log.action, getActionLabel(log.action, t), log.location, log.detail]
         .join(" ")
         .toLocaleLowerCase("vi")
         .includes(keyword),
     );
-  }, [logs, query]);
+  }, [logs, query, t]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLogs.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -116,9 +118,9 @@ export default function ActivityLogsPage() {
     <section className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">Nhật ký hoạt động</h1>
+          <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">{t("activityLogs")}</h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Theo dõi các thao tác đã thực hiện trên hệ thống.
+            {t("activityLogsDescription")}
           </p>
         </div>
         <button
@@ -132,15 +134,15 @@ export default function ActivityLogsPage() {
             <polyline points="1 20 1 14 7 14" />
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
-          {loading ? "Đang tải..." : "Tải lại"}
+          {loading ? t("loading") : t("refreshData")}
         </button>
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
         <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="font-semibold text-gray-800 dark:text-white/90">Lịch sử thao tác</h2>
-            <p className="mt-0.5 text-xs text-gray-400">{filteredLogs.length} bản ghi</p>
+            <h2 className="font-semibold text-gray-800 dark:text-white/90">{t("operationHistory")}</h2>
+            <p className="mt-0.5 text-xs text-gray-400">{t("recordCount", { count: filteredLogs.length })}</p>
           </div>
           <div className="relative w-full sm:max-w-sm">
             <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -153,7 +155,7 @@ export default function ActivityLogsPage() {
                 setQuery(event.target.value);
                 setPage(1);
               }}
-              placeholder="Tìm người dùng, hành động, nội dung..."
+              placeholder={t("searchActivityLogs")}
               className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-10 pr-3 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500"
             />
           </div>
@@ -172,7 +174,7 @@ export default function ActivityLogsPage() {
             <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M9 12h6" /><path d="M9 16h6" /><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><polyline points="13 2 13 9 20 9" />
             </svg>
-            Không tìm thấy nhật ký hoạt động.
+            {t("noActivityLogs")}
           </div>
         ) : (
           <>
@@ -181,9 +183,9 @@ export default function ActivityLogsPage() {
                 <article key={log.id || `mobile-log-${logIndex}`} className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
                   <div className="flex items-start justify-between gap-3">
                     <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-400">
-                      {getActionLabel(log.action)}
+                      {getActionLabel(log.action, t)}
                     </span>
-                    <time className="text-right text-xs text-gray-400">{formatDateTime(log.createdAt)}</time>
+                    <time className="text-right text-xs text-gray-400">{formatDateTime(log.createdAt, language)}</time>
                   </div>
                   <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-white/90">{getActor(log)}</p>
                   <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
@@ -194,7 +196,7 @@ export default function ActivityLogsPage() {
                       Session: {log.session || "—"}
                     </span>
                   </div>
-                  <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">{log.detail || "Không có nội dung chi tiết"}</p>
+                  <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">{log.detail || t("noDetailContent")}</p>
                   {log.location && <p className="mt-2 break-all text-xs text-gray-400">{log.location}</p>}
                 </article>
               ))}
@@ -204,25 +206,25 @@ export default function ActivityLogsPage() {
               <table className="w-full min-w-[1100px] table-fixed">
                 <thead className="bg-gray-50 dark:bg-gray-900/50">
                   <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    <th className="w-[15%] px-5 py-3">Thời gian</th>
-                    <th className="w-[13%] px-5 py-3">Người thực hiện</th>
+                    <th className="w-[15%] px-5 py-3">{t("time")}</th>
+                    <th className="w-[13%] px-5 py-3">{t("performedBy")}</th>
                     <th className="w-[8%] px-5 py-3">Role</th>
                     <th className="w-[8%] px-5 py-3">Session</th>
-                    <th className="w-[15%] px-5 py-3">Hành động</th>
-                    <th className="w-[14%] px-5 py-3">Vị trí</th>
-                    <th className="w-[27%] px-5 py-3">Nội dung</th>
+                    <th className="w-[15%] px-5 py-3">{t("action")}</th>
+                    <th className="w-[14%] px-5 py-3">{t("location")}</th>
+                    <th className="w-[27%] px-5 py-3">{t("content")}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                   {displayedLogs.map((log, logIndex) => (
                     <tr key={log.id || `desktop-log-${logIndex}`} className="align-top transition-colors hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
-                      <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{formatDateTime(log.createdAt)}</td>
+                      <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{formatDateTime(log.createdAt, language)}</td>
                       <td className="px-5 py-4 text-sm font-semibold text-gray-800 dark:text-white/90">{getActor(log)}</td>
                       <td className="break-words px-5 py-4 text-sm text-gray-600 dark:text-gray-300">{log.role || "—"}</td>
                       <td className="break-words px-5 py-4 text-sm text-gray-600 dark:text-gray-300">{log.session || "—"}</td>
                       <td className="px-5 py-4">
                         <span className="inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-400">
-                          {getActionLabel(log.action)}
+                          {getActionLabel(log.action, t)}
                         </span>
                       </td>
                       <td className="break-all px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{log.location || "—"}</td>
@@ -238,7 +240,7 @@ export default function ActivityLogsPage() {
         {!loading && !error && filteredLogs.length > PAGE_SIZE && (
           <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
             <p className="text-xs text-gray-400">
-              Hiển thị {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filteredLogs.length)} / {filteredLogs.length} bản ghi
+              {t("showingRecords", { from: (safePage - 1) * PAGE_SIZE + 1, to: Math.min(safePage * PAGE_SIZE, filteredLogs.length), total: filteredLogs.length })}
             </p>
             <div className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
               {getPageNumbers(safePage, totalPages).map((pageNumber, index) =>
@@ -249,7 +251,7 @@ export default function ActivityLogsPage() {
                     key={pageNumber}
                     type="button"
                     onClick={() => setPage(pageNumber)}
-                    aria-label={`Đến trang ${pageNumber}`}
+                    aria-label={t("goToPage", { page: pageNumber })}
                     aria-current={pageNumber === safePage ? "page" : undefined}
                     className={`h-9 w-9 shrink-0 rounded-lg border text-sm font-semibold transition-colors ${
                       pageNumber === safePage

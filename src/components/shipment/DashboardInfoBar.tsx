@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface DashboardInfoBarProps {
   lastUpdated: string;
@@ -9,18 +10,18 @@ interface DashboardInfoBarProps {
   onRefresh: () => Promise<void>;
 }
 
-function formatRelativeTime(isoString: string): string {
+function formatRelativeTime(isoString: string, translate: (key: string, variables?: Record<string, string | number>) => string): string {
   const date = new Date(isoString);
   const diffMins = Math.floor((Date.now() - date.getTime()) / 60000);
-  if (diffMins < 1) return "Vừa xong";
-  if (diffMins < 60) return `${diffMins} phút trước`;
+  if (diffMins < 1) return translate("justNow");
+  if (diffMins < 60) return translate("minutesAgo", { count: diffMins });
   const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours} giờ trước`;
-  return `${Math.floor(diffHours / 24)} ngày trước`;
+  if (diffHours < 24) return translate("hoursAgo", { count: diffHours });
+  return translate("daysAgo", { count: Math.floor(diffHours / 24) });
 }
 
-function formatDateTime(isoString: string): string {
-  return new Date(isoString).toLocaleString("vi-VN", {
+function formatDateTime(isoString: string, language: "vi" | "en"): string {
+  return new Date(isoString).toLocaleString(language === "en" ? "en-GB" : "vi-VN", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
@@ -31,10 +32,11 @@ function formatDateTime(isoString: string): string {
 
 export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh }: DashboardInfoBarProps) {
   const { user } = useAuth();
+  const { language, t } = useLanguage();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showRefreshSuccess, setShowRefreshSuccess] = useState(false);
   const isAdmin = user?.role?.trim().toLowerCase() === "admin";
-  const updaterName = user?.name?.trim() || updatedBy || "Admin hệ thống";
+  const updaterName = user?.name?.trim() || updatedBy || t("systemAdmin");
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -58,18 +60,18 @@ export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh }: 
           </svg>
         </div>
         <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
-          Cập nhật lần cuối: {formatRelativeTime(lastUpdated)} · {formatDateTime(lastUpdated)}
-          <span className="text-gray-400"> bởi {updaterName}</span>
+          {t("lastUpdated", { time: `${formatRelativeTime(lastUpdated, t)} · ${formatDateTime(lastUpdated, language)}` })}
+          <span className="text-gray-400"> {t("updatedBy", { name: updaterName })}</span>
         </p>
       </div>
 
       <div className="flex items-center gap-2">
-        {showRefreshSuccess && <span className="text-xs font-medium text-success-600">✓ Đã cập nhật!</span>}
+        {showRefreshSuccess && <span className="text-xs font-medium text-success-600">✓ {t("refreshSucceeded")}</span>}
         <button
           type="button"
           onClick={handleRefresh}
           disabled={isRefreshing || !isAdmin}
-          title={isAdmin ? "Cập nhật dữ liệu hệ thống" : "Chỉ admin mới có quyền cập nhật dữ liệu"}
+          title={isAdmin ? t("refreshSystemData") : t("adminRefreshOnly")}
           className="inline-flex items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-4 py-2 text-xs font-semibold text-brand-600 transition-all hover:border-brand-300 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/20"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={isRefreshing ? "animate-spin" : ""}>
@@ -77,7 +79,7 @@ export default function DashboardInfoBar({ lastUpdated, updatedBy, onRefresh }: 
             <polyline points="1 20 1 14 7 14" />
             <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
           </svg>
-          {isRefreshing ? "Đang cập nhật..." : "Cập nhật dữ liệu"}
+          {isRefreshing ? t("updating") : t("refreshData")}
         </button>
       </div>
     </div>

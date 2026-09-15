@@ -1,36 +1,36 @@
 "use client";
 import React, { useState, useMemo } from "react";
 import type { Shipment } from "@/types/shipment";
+import { useLanguage } from "@/context/LanguageContext";
 
 interface ShipmentTableProps {
   shipments: Shipment[];
   onRowClick: (shipment: Shipment) => void;
-  onReload: () => Promise<void>;
 }
 
 const PAGE_SIZE = 10;
 
-const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; dot: string }> = {
-  cancelled: { label: "Đã hủy", color: "text-error-600 dark:text-error-400", bg: "bg-error-50 dark:bg-error-500/10", dot: "bg-error-500" },
-  buying: { label: "Lên đơn hàng", color: "text-amber-700", bg: "bg-amber-50 dark:bg-amber-500/10", dot: "bg-amber-500" },
-  shipping: { label: "Xin giấy phép / Vận chuyển biển", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
-  arrived: { label: "Đã đến cảng", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
-  declared: { label: "Nộp tờ khai", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
-  fifteenb: { label: "Mẫu 15B", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
-  customs: { label: "Thông quan", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
-  delivered: { label: "Giao hàng thành công", color: "text-success-600", bg: "bg-success-50 dark:bg-success-500/10", dot: "bg-success-500" },
+const STATUS_CONFIG: Record<string, { labelKey: string; color: string; bg: string; dot: string }> = {
+  cancelled: { labelKey: "cancelledStatus", color: "text-error-600 dark:text-error-400", bg: "bg-error-50 dark:bg-error-500/10", dot: "bg-error-500" },
+  buying: { labelKey: "stageBuying", color: "text-amber-700", bg: "bg-amber-50 dark:bg-amber-500/10", dot: "bg-amber-500" },
+  shipping: { labelKey: "stageShipping", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
+  arrived: { labelKey: "stageArrived", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
+  declared: { labelKey: "stageDeclared", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
+  fifteenb: { labelKey: "stageFifteenB", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
+  customs: { labelKey: "stageCustoms", color: "text-blue-light-600", bg: "bg-blue-light-50 dark:bg-blue-light-500/10", dot: "bg-blue-light-500" },
+  delivered: { labelKey: "delivered", color: "text-success-600", bg: "bg-success-50 dark:bg-success-500/10", dot: "bg-success-500" },
 };
 
 type SortKey = "orderCode" | "shipName" | "supplier" | "eta" | "status" | "receivedDocs";
 type SortDir = "asc" | "desc";
 
-const SORT_OPTIONS: { value: SortKey; label: string }[] = [
-  { value: "orderCode", label: "Số HĐ" },
-  { value: "shipName", label: "Tên hàng" },
-  { value: "supplier", label: "Nhà cung cấp" },
-  { value: "eta", label: "ETA" },
-  { value: "status", label: "Trạng thái" },
-  { value: "receivedDocs", label: "Giấy tờ" },
+const SORT_OPTIONS: { value: SortKey; labelKey: string }[] = [
+  { value: "orderCode", labelKey: "orderNumber" },
+  { value: "shipName", labelKey: "productName" },
+  { value: "supplier", labelKey: "supplier" },
+  { value: "eta", labelKey: "estimatedArrivalShort" },
+  { value: "status", labelKey: "status" },
+  { value: "receivedDocs", labelKey: "documents" },
 ];
 
 function SortIcon({
@@ -62,12 +62,12 @@ function SortIcon({
   );
 }
 
-function formatDate(iso?: string): string {
+function formatDate(iso: string | undefined, language: "vi" | "en"): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("vi-VN");
+  return new Date(iso).toLocaleDateString(language === "en" ? "en-GB" : "vi-VN");
 }
 
-function DocBar({ total, received, missingList }: { total: number; received: number; missingList: string }) {
+function DocBar({ total, received, missingList, missingLabel }: { total: number; received: number; missingList: string; missingLabel: string }) {
   const pct = total > 0 ? (received / total) * 100 : 0;
   const missing = total - received;
   return (
@@ -85,7 +85,7 @@ function DocBar({ total, received, missingList }: { total: number; received: num
       </div>
       {missing > 0 && missingList && (
         <p className="text-[10px] text-gray-400 truncate max-w-[160px]" title={missingList}>
-          Thiếu: {missingList}
+          {missingLabel}: {missingList}
         </p>
       )}
     </div>
@@ -95,13 +95,17 @@ function DocBar({ total, received, missingList }: { total: number; received: num
 function ShipmentCard({
   shipment,
   onClick,
+  t,
+  language,
 }: {
   shipment: Shipment;
   onClick: () => void;
+  t: (key: string, variables?: Record<string, string | number>) => string;
+  language: "vi" | "en";
 }) {
   const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
   const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.buying;
-  const statusLabel = shipment.status === "cancelled" ? sc.label : shipment.flowStageLabel || sc.label;
+  const statusLabel = t(sc.labelKey);
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Enter" || event.key === " ") {
@@ -129,7 +133,7 @@ function ShipmentCard({
         </div>
         <button
           type="button"
-          aria-label={`Xem chi tiết ${shipment.orderCode}`}
+          aria-label={t("viewShipmentDetails", { orderCode: shipment.orderCode })}
           onClick={(event) => {
             event.stopPropagation();
             onClick();
@@ -145,24 +149,24 @@ function ShipmentCard({
 
       <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 border-t border-gray-100 pt-3 dark:border-gray-700">
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wide text-gray-400">Nhà cung cấp</p>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("supplier")}</p>
           <p className="mt-0.5 truncate text-xs font-medium text-gray-700 dark:text-gray-300" title={shipment.supplier}>
             {shipment.supplier || "—"}
           </p>
         </div>
         <div className="min-w-0">
-          <p className="text-[10px] uppercase tracking-wide text-gray-400">Cảng / Tàu</p>
+          <p className="text-[10px] uppercase tracking-wide text-gray-400">{t("portCarrier")}</p>
           <p className="mt-0.5 truncate text-xs text-gray-600 dark:text-gray-300" title={[shipment.port, shipment.vessel].filter(Boolean).join(" / ")}>
             {[shipment.port, shipment.vessel].filter(Boolean).join(" / ") || "—"}
           </p>
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400">ETD</p>
-          <p className="mt-0.5 text-xs font-medium text-gray-600 dark:text-gray-300">{formatDate(shipment.etd)}</p>
+          <p className="mt-0.5 text-xs font-medium text-gray-600 dark:text-gray-300">{formatDate(shipment.etd, language)}</p>
         </div>
         <div>
           <p className="text-[10px] uppercase tracking-wide text-gray-400">ETA</p>
-          <p className="mt-0.5 text-xs font-medium text-brand-600 dark:text-brand-400">{formatDate(shipment.eta)}</p>
+          <p className="mt-0.5 text-xs font-medium text-brand-600 dark:text-brand-400">{formatDate(shipment.eta, language)}</p>
         </div>
       </div>
 
@@ -174,26 +178,17 @@ function ShipmentCard({
           <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${sc.dot}`} />
           <span className="truncate">{statusLabel}</span>
         </span>
-        <DocBar total={shipment.totalDocs} received={shipment.receivedDocs} missingList={shipment.missingDocs} />
+        <DocBar total={shipment.totalDocs} received={shipment.receivedDocs} missingList={shipment.missingDocs} missingLabel={t("missing")} />
       </div>
     </div>
   );
 }
 
-export default function ShipmentTable({ shipments, onRowClick, onReload }: ShipmentTableProps) {
+export default function ShipmentTable({ shipments, onRowClick }: ShipmentTableProps) {
+  const { language, t } = useLanguage();
   const [sortKey, setSortKey] = useState<SortKey>("eta");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [page, setPage] = useState(1);
-  const [isReloading, setIsReloading] = useState(false);
-
-  const handleReload = async () => {
-    setIsReloading(true);
-    try {
-      await onReload();
-    } finally {
-      setIsReloading(false);
-    }
-  };
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -270,28 +265,14 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
       {/* Table header */}
       <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-4 dark:border-gray-800 sm:px-5">
         <div className="min-w-0">
-          <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">Danh sách đơn hàng</h3>
+          <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">{t("shipmentList")}</h3>
           <p className="text-xs text-gray-400 mt-0.5">
-            {shipments.length} đơn hàng
-            {shipments.length > 0 && ` • Trang ${safePage}/${totalPages}`}
+            {t("shipmentCount", { count: shipments.length })}
+            {shipments.length > 0 && ` • ${t("pageOf", { page: safePage, total: totalPages })}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={handleReload}
-            disabled={isReloading}
-            title="Tải lại dữ liệu shipment"
-            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-600 transition-colors hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-400 dark:hover:border-brand-500/30 dark:hover:bg-brand-500/10 dark:hover:text-brand-400"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={isReloading ? "animate-spin" : ""}>
-              <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-            <span className="hidden sm:inline">{isReloading ? "Đang tải..." : "Reload data"}</span>
-          </button>
-          <span className="text-xs text-gray-400">Click vào hàng để xem chi tiết</span>
+          <span className="text-xs text-gray-400">{t("clickRowForDetails")}</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-300">
             <circle cx="12" cy="12" r="10"/>
             <line x1="12" y1="8" x2="12" y2="12"/>
@@ -305,7 +286,7 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1">
             <label htmlFor="shipment-mobile-sort" className="mb-1.5 block text-xs font-medium text-gray-500 dark:text-gray-400">
-              Sắp xếp theo
+              {t("sortBy")}
             </label>
             <select
               id="shipment-mobile-sort"
@@ -314,13 +295,13 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
               className="w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 focus:border-brand-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white"
             >
               {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+                <option key={option.value} value={option.value}>{t(option.labelKey)}</option>
               ))}
             </select>
           </div>
           <button
             type="button"
-            aria-label={sortDir === "asc" ? "Sắp xếp giảm dần" : "Sắp xếp tăng dần"}
+            aria-label={sortDir === "asc" ? t("sortDescending") : t("sortAscending")}
             onClick={() => setSortDir((direction) => direction === "asc" ? "desc" : "asc")}
             className="inline-flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-gray-500 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-400 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10"
           >
@@ -331,13 +312,15 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
         </div>
 
         {paged.length === 0 ? (
-          <div className="py-10 text-center text-sm text-gray-400">Không tìm thấy đơn hàng nào</div>
+          <div className="py-10 text-center text-sm text-gray-400">{t("noShipments")}</div>
         ) : (
           paged.map((shipment) => (
             <ShipmentCard
               key={shipment.id}
               shipment={shipment}
               onClick={() => onRowClick(shipment)}
+              t={t}
+              language={language}
             />
           ))
         )}
@@ -348,29 +331,29 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
           <table className="w-full min-w-0 table-fixed border-separate border-spacing-0 [&_td]:overflow-hidden [&_th]:overflow-hidden lg:max-xl:min-w-[1120px]">
             <thead className="border-b border-gray-100 dark:border-gray-800">
             <tr>
-              <th className="sticky top-[65px] z-40 w-[4%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">STT</th>
+              <th className="sticky top-[65px] z-40 w-[4%] bg-gray-50/95 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("sequence")}</th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[10%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("orderCode")}>
-                <div className="flex items-center gap-1.5">Số HĐ <SortIcon col="orderCode" sortKey={sortKey} sortDir={sortDir} /></div>
+                <div className="flex items-center gap-1.5">{t("orderNumber")} <SortIcon col="orderCode" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[19%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("shipName")}>
-                <div className="flex items-center gap-1.5">Tên hàng <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
+                <div className="flex items-center gap-1.5">{t("productName")} <SortIcon col="shipName" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[15%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("supplier")}>
-                <div className="flex items-center gap-1.5">Nhà cung cấp <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
+                <div className="flex items-center gap-1.5">{t("supplier")} <SortIcon col="supplier" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[11%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`}>
-                Cảng / Tàu
+                {t("portCarrier")}
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[12%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("eta")}>
                 <div className="flex items-center gap-1.5">ETD / ETA <SortIcon col="eta" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[14%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("status")}>
-                <div className="flex items-center gap-1.5">Trạng thái <SortIcon col="status" sortKey={sortKey} sortDir={sortDir} /></div>
+                <div className="flex items-center gap-1.5">{t("status")} <SortIcon col="status" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
               <th className={`${headerCls} sticky top-[65px] z-40 bg-gray-50/95 w-[14%] backdrop-blur lg:top-[73px] dark:bg-gray-900/95`} onClick={() => handleSort("receivedDocs")}>
-                <div className="flex items-center gap-1.5">Giấy tờ <SortIcon col="receivedDocs" sortKey={sortKey} sortDir={sortDir} /></div>
+                <div className="flex items-center gap-1.5">{t("documents")} <SortIcon col="receivedDocs" sortKey={sortKey} sortDir={sortDir} /></div>
               </th>
-              <th className="sticky top-[65px] z-40 bg-gray-50/95 py-3 px-4 w-[5%] text-center text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">Xem</th>
+              <th className="sticky top-[65px] z-40 bg-gray-50/95 py-3 px-4 w-[5%] text-center text-xs font-semibold uppercase tracking-wider text-gray-500 backdrop-blur lg:top-[73px] dark:bg-gray-900/95 dark:text-gray-400">{t("view")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
@@ -382,7 +365,7 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
                       <circle cx="11" cy="11" r="8"/>
                       <line x1="21" y1="21" x2="16.65" y2="16.65"/>
                     </svg>
-                    Không tìm thấy đơn hàng nào
+                    {t("noShipments")}
                   </div>
                 </td>
               </tr>
@@ -390,7 +373,7 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
               paged.map((shipment, rowIdx) => {
                 const statusKey = shipment.status === "cancelled" ? "cancelled" : shipment.flowStageKey || "buying";
                 const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.buying;
-                const statusLabel = shipment.status === "cancelled" ? sc.label : shipment.flowStageLabel || sc.label;
+                const statusLabel = t(sc.labelKey);
                 const rowNum = (safePage - 1) * PAGE_SIZE + rowIdx + 1;
                 return (
                   <tr
@@ -465,13 +448,13 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
                         {shipment.etd && (
                           <div className="flex items-center gap-1.5">
                             <span className="text-[10px] text-gray-400 w-7">ETD</span>
-                            <span className="text-xs font-medium text-gray-600 dark:text-gray-300 truncate">{formatDate(shipment.etd)}</span>
+                            <span className="text-xs font-medium text-gray-600 dark:text-gray-300 truncate">{formatDate(shipment.etd, language)}</span>
                           </div>
                         )}
                         {shipment.eta && (
                           <div className="flex items-center gap-1.5">
                             <span className="text-[10px] text-brand-400 w-7">ETA</span>
-                            <span className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">{formatDate(shipment.eta)}</span>
+                            <span className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">{formatDate(shipment.eta, language)}</span>
                           </div>
                         )}
                       </div>
@@ -496,6 +479,7 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
                         total={shipment.totalDocs}
                         received={shipment.receivedDocs}
                         missingList={shipment.missingDocs}
+                        missingLabel={t("missing")}
                       />
                     </td>
 
@@ -523,7 +507,7 @@ export default function ShipmentTable({ shipments, onRowClick, onReload }: Shipm
       {totalPages > 1 && (
         <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <p className="text-xs text-gray-400">
-            Hiển thị <span className="font-medium text-gray-600 dark:text-gray-300">{(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, sorted.length)}</span> / {sorted.length} đơn hàng
+            {t("showingShipments", { from: (safePage - 1) * PAGE_SIZE + 1, to: Math.min(safePage * PAGE_SIZE, sorted.length), total: sorted.length })}
           </p>
           <div className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
             {/* Prev */}

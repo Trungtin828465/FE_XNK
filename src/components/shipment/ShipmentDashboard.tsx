@@ -233,7 +233,7 @@ export default function ShipmentDashboard() {
           </div>
         </div>
       ) : (
-        <ShipmentTable shipments={filteredShipments} onRowClick={handleRowClick} onReload={loadData} />
+        <ShipmentTable shipments={filteredShipments} onRowClick={handleRowClick} />
       )}
 
       {/* Detail modal */}
