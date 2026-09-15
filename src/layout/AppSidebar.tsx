@@ -10,7 +10,7 @@ import { GridIcon, HorizontaLDots } from "../icons/index";
 import { useLanguage } from "../context/LanguageContext";
 
 const AppSidebar: React.FC = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { isExpanded, isMobileOpen, isHovered, setIsHovered } = useSidebar();
   const pathname = usePathname();
   const showText = isExpanded || isHovered || isMobileOpen;
@@ -21,7 +21,7 @@ const AppSidebar: React.FC = () => {
 
   return (
     <aside
-      className={`fixed left-0 top-0 z-50 mt-16 flex h-screen flex-col border-r border-gray-200 bg-white px-5 text-gray-900 transition-all duration-300 ease-in-out dark:border-gray-800 dark:bg-gray-900 lg:mt-0
+      className={`fixed left-0 top-0 z-50 mt-16 flex h-[calc(100vh-4rem)] flex-col border-r border-gray-200 bg-white px-5 text-gray-900 transition-all duration-300 ease-in-out dark:border-gray-800 dark:bg-gray-900 lg:mt-0 lg:h-screen
         ${isExpanded || isMobileOpen || isHovered ? "w-[290px]" : "w-[90px]"}
         ${isMobileOpen ? "translate-x-0" : "-translate-x-full"}
         lg:translate-x-0`}
@@ -45,7 +45,7 @@ const AppSidebar: React.FC = () => {
         </Link>
       </div>
 
-      <nav className="mb-6">
+      <nav className="mb-6 min-h-0 flex-1 overflow-y-auto">
         <h2
           className={`mb-4 flex text-xs uppercase leading-5 text-gray-400 ${
             !isExpanded && !isHovered ? "lg:justify-center" : "justify-start"
@@ -72,6 +72,23 @@ const AppSidebar: React.FC = () => {
                 <GridIcon />
               </span>
               {showText && <span className="menu-item-text">{t("importExport")}</span>}
+            </Link>
+          </li>
+          <li>
+            <Link
+              href="/user-guide"
+              className={`menu-item group ${
+                pathname === "/user-guide" ? "menu-item-active" : "menu-item-inactive"
+              } ${!showText ? "lg:justify-center" : "lg:justify-start"}`}
+            >
+              <span className={pathname === "/user-guide" ? "menu-item-icon-active" : "menu-item-icon-inactive"}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                  <path d="M9 7h6M9 11h6" />
+                </svg>
+              </span>
+              {showText && <span className="menu-item-text">{t("userGuide")}</span>}
             </Link>
           </li>
           {canViewLogs && (
@@ -132,6 +149,37 @@ const AppSidebar: React.FC = () => {
           )}
         </ul>
       </nav>
+
+      <div className="border-t border-gray-200 py-5 dark:border-gray-800">
+        <button
+          type="button"
+          onClick={logout}
+          title={t("logout")}
+          aria-label={t("logout")}
+          className={`menu-item group w-full text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-500/10 dark:hover:text-red-300 ${
+            !showText ? "lg:justify-center" : "lg:justify-start"
+          }`}
+        >
+          <span className="shrink-0">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M10 17l5-5-5-5" />
+              <path d="M15 12H3" />
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+            </svg>
+          </span>
+          {showText && <span className="menu-item-text">{t("logout")}</span>}
+        </button>
+      </div>
     </aside>
   );
 };
