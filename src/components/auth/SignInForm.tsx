@@ -31,7 +31,8 @@ export default function SignInForm() {
     try {
       const user = await login(username, password);
       setUser(user);
-      router.push("/");
+      // router.push("/");
+      window.location.replace("/")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
