@@ -6,7 +6,6 @@ import Button from "@/components/ui/button/Button";
 import { login } from "@/services/authApi";
 import { ChevronLeftIcon, EyeCloseIcon, EyeIcon } from "@/icons";
 import { useAuth } from "@/context/AuthContext";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import React, { useState } from "react";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
@@ -21,7 +20,6 @@ export default function SignInForm() {
   const { user: currentUser, setUser } = useAuth();
   const canManageUsers = canPerformShipmentAction(currentUser, "registerUser")
     && canPerformShipmentAction(currentUser, "updateUserPassword");
-  const router = useRouter();
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -31,8 +29,7 @@ export default function SignInForm() {
     try {
       const user = await login(username, password);
       setUser(user);
-      // router.push("/");
-      window.location.replace("/")
+      window.location.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

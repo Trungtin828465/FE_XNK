@@ -46,6 +46,6 @@ export function createInvalidResponseError(scope: string, method: string, path: 
 
 export function createNetworkApiError(scope: string, method: string, path: string, error: TypeError): Error {
   return new Error(
-    `[${scope}] Không thể kết nối khi gọi ${method} ${path}. Kiểm tra backend, NEXT_PUBLIC_API_BASE_URL và CORS. Chi tiết: ${error.message}`,
+    `[${scope}] Không thể kết nối khi gọi ${method} ${path}. Kiểm tra API proxy /api/xnk và BE_XNK_API_URL trên server. Chi tiết: ${error.message}`,
   );
 }

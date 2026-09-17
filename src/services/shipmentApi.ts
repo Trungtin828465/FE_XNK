@@ -7,6 +7,7 @@ import type {
   ShipmentMetricsSummary,
 } from "@/types/shipment";
 import { getStoredUser } from "@/services/authApi";
+import { backendApiUrl } from "@/services/backendApiUrl";
 import {
   fetchDriveDocumentRows,
   fetchNotificationRows,
@@ -20,7 +21,6 @@ import { buildCKLineTrackingPayload, type CKLineTrackingLaunchResponse } from "@
 import type { DriveDocumentFileRecord, DriveDocumentRecord, DriveDocumentValue, NotificationRecord, PostgresShipmentRelations, PostgresShipmentSnapshot, PurchaseRecord } from "@/types/postgresShipment";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 export const NOTIFICATIONS_SYNC_EVENT = "xnk:notifications-sync";
 const DOCUMENT_CODES = [
   "PI", "INV", "PKL", "BL", "CO", "HC", "DON_KD", "BB_LM",
@@ -54,7 +54,7 @@ export const SUMMARY_FIELDS = [
 ] as const;
 
 function endpoint(path: string): string {
-  return `${API_BASE}/api/${path.replace(/^\//, "")}`;
+  return backendApiUrl(`/api/${path.replace(/^\//, "")}`);
 }
 
 function parseDate(value: unknown): string | undefined {

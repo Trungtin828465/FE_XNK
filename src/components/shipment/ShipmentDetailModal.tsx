@@ -18,8 +18,7 @@ import { CK_LINE_CARRIER_CONFIG } from "@/utils/ckLineTracking";
 import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMatching";
 import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCatalogOptions";
 import { toDocumentPreviewUrl } from "@/utils/documentPreview";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
+import { backendApiUrl } from "@/services/backendApiUrl";
 
 interface ShipmentDetailModalProps {
   shipment: Shipment | null;
@@ -173,8 +172,7 @@ type TrackingApiResponse = {
 };
 
 function buildBackendTrackingUrl(endpoint: string, trackingCode: string): string {
-  const normalizedApiBase = API_BASE.replace(/\/+$/, "");
-  return `${normalizedApiBase}${endpoint}/${encodeURIComponent(trackingCode)}`;
+  return `${backendApiUrl(endpoint)}/${encodeURIComponent(trackingCode)}`;
 }
 
 function buildMscTrackingUrl(trackingCode: string): string {

@@ -1,4 +1,5 @@
 import { getStoredUser } from "@/services/authApi";
+import { backendApiUrl } from "@/services/backendApiUrl";
 import type {
   CarrierRecord,
   ContainerDetailRecord,
@@ -18,7 +19,6 @@ import type {
 import type { ReturnItem } from "@/types/shipment";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 
 type JsonRecord = Record<string, unknown>;
 
@@ -49,7 +49,7 @@ async function databaseRequest<T>(path: string, init: RequestInit = {}): Promise
   const method = String(init.method || "GET").toUpperCase();
   const apiPath = `/api/${path.replace(/^\//, "")}`;
   try {
-    const response = await fetch(`${API_BASE}${apiPath}`, {
+    const response = await fetch(backendApiUrl(apiPath), {
       ...init,
       cache: "no-store",
       headers: {

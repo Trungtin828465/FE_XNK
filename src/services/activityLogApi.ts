@@ -1,8 +1,8 @@
 import type { AuthUser } from "@/types/auth";
 import { getStoredUser } from "@/services/authApi";
+import { backendApiUrl } from "@/services/backendApiUrl";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 
 export interface ActivityLogPayload {
   action: string;
@@ -62,7 +62,7 @@ export async function getActivityLogs(): Promise<ActivityLog[]> {
   const token = getStoredUser()?.token?.trim();
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${apiPath}`, {
+    response = await fetch(backendApiUrl(apiPath), {
       method: "GET",
       headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       cache: "no-store",
@@ -95,7 +95,7 @@ export async function createActivityLog(user: AuthUser | null, payload: Activity
   const apiPath = "/api/auth/activity-logs";
   let response: Response;
   try {
-    response = await fetch(`${API_BASE}${apiPath}`, {
+    response = await fetch(backendApiUrl(apiPath), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

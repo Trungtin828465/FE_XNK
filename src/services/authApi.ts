@@ -1,7 +1,7 @@
 import type { AuthUser, LoginResponse } from "@/types/auth";
+import { backendApiUrl } from "@/services/backendApiUrl";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
 const AUTH_STORAGE_KEY = "dashboard_auth_user";
 export const AUTH_TOKEN_COOKIE_KEY = "xnk_auth_token";
 
@@ -85,7 +85,7 @@ function extractUser(json: LoginResponse, fallbackUsername: string): AuthUser {
 export async function login(username: string, password: string): Promise<AuthUser> {
   const apiPath = "/api/auth/login";
   try {
-    const res = await fetch(`${API_BASE}${apiPath}`, {
+    const res = await fetch(backendApiUrl(apiPath), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -158,7 +158,7 @@ async function authRequest(path: string, init: RequestInit): Promise<unknown> {
   const method = String(init.method || "GET").toUpperCase();
   const apiPath = `/api/auth/${path}`;
   try {
-    const response = await fetch(`${API_BASE}${apiPath}`, {
+    const response = await fetch(backendApiUrl(apiPath), {
       ...init,
       headers: {
         Accept: "application/json",
@@ -185,7 +185,7 @@ async function postAuthAction(path: string, body: Record<string, string>): Promi
   const token = getStoredUser()?.token?.trim();
   const apiPath = `/api/auth/${path}`;
   try {
-    const response = await fetch(`${API_BASE}${apiPath}`, {
+    const response = await fetch(backendApiUrl(apiPath), {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
