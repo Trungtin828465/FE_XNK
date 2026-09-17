@@ -133,6 +133,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   const { t } = useLanguage();
   const canCreateShipment = canPerformShipmentAction(user, "createShipment");
   const inputRef = useRef<HTMLInputElement>(null);
+  const uploadRequestIdRef = useRef<string | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null);
   const [isFilePanelOpen, setIsFilePanelOpen] = useState(false);
@@ -186,6 +187,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
   }, [file]);
 
   const reset = () => {
+    uploadRequestIdRef.current = null;
     setFile(null);
     setIsFilePanelOpen(false);
     setIsFilePanelMaximized(false);
@@ -213,6 +215,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
     }
 
     setFile(selected);
+    uploadRequestIdRef.current = crypto.randomUUID();
     setError("");
     setIsAnalyzing(true);
     try {
@@ -337,6 +340,7 @@ export default function CreateShipmentModal({ isOpen, onClose, onCreated, existi
         documentCode: "PI",
         fileName: file.name,
         fileData,
+        requestId: uploadRequestIdRef.current || (uploadRequestIdRef.current = crypto.randomUUID()),
       });
       recordActivity(user, {
         action: "CREATE_SHIPMENT",

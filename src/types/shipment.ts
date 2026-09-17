@@ -2,7 +2,7 @@
 // Shipment Domain Types
 // ============================================================
 
-import type { PostgresShipmentRelations } from "@/types/postgresShipment";
+import type { DriveDocumentFileRecord, PostgresShipmentRelations } from "@/types/postgresShipment";
 
 export type ShipmentStatus =
   | "shipping"      // Đang vận chuyển (chưa đến ETA)
@@ -27,6 +27,9 @@ export interface ShipmentDocument {
   status: DocumentStatus;
   fileId?: string;
   url?: string;
+  /** Multiple physical files for the same document type, when supplied by the backend. */
+  urls?: string[];
+  files?: DriveDocumentFileRecord[];
   updatedAt?: string;
   note?: string;
   uploaderEmail?: string;
@@ -131,6 +134,7 @@ export interface DriveDataResponse {
   fileUrl?: string;
   fileName?: string;
   fileId?: string;
+  files?: DriveDocumentFileRecord[];
   updatedAt?: string;
 }
 

@@ -17,7 +17,7 @@ import {
 } from "@/services/postgresShipmentApi";
 import type { EvergreenTrackingLaunchResponse } from "@/utils/evergreenTracking";
 import { buildCKLineTrackingPayload, type CKLineTrackingLaunchResponse } from "@/utils/ckLineTracking";
-import type { DriveDocumentRecord, NotificationRecord, PostgresShipmentRelations, PostgresShipmentSnapshot, PurchaseRecord } from "@/types/postgresShipment";
+import type { DriveDocumentFileRecord, DriveDocumentRecord, DriveDocumentValue, NotificationRecord, PostgresShipmentRelations, PostgresShipmentSnapshot, PurchaseRecord } from "@/types/postgresShipment";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000").replace(/\/+$/, "");
@@ -79,27 +79,67 @@ function parseDate(value: unknown): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString().split("T")[0];
 }
 
-const DOCUMENT_FIELD_MAP: Record<(typeof DOCUMENT_CODES)[number], keyof DriveDocumentRecord> = {
+const DOCUMENT_FIELD_MAP = {
   PI: "pi", INV: "inv", PKL: "pkl", BL: "bl", CO: "co", HC: "hc",
   DON_KD: "don_kd", BB_LM: "bb_lm", PHI_TK: "phi_tk", THUE_NK: "thue_nk",
   TK: "tk", "15B": "15b", QDTQ: "qdtq", MV: "mv", TRA_CONG: "tra_cong",
-};
+} as const satisfies Record<(typeof DOCUMENT_CODES)[number], keyof DriveDocumentRecord>;
 
 function buildDocuments(total: DriveDocumentRecord | undefined): ShipmentDocument[] {
   return DOCUMENT_CODES.map((code) => {
-    const rawUrl = total?.[DOCUMENT_FIELD_MAP[code]];
-    const url = typeof rawUrl === "string" ? rawUrl.trim() : "";
-    const passed = url.toUpperCase() === "PASS";
+    const rawValue = total?.[DOCUMENT_FIELD_MAP[code]];
+    const passed = typeof rawValue === "string" && rawValue.trim().toUpperCase() === "PASS";
+    const files = passed ? [] : parseDocumentFiles(rawValue);
+    const urls = files.map((file) => file.fileUrl);
+    const firstFile = files[0];
     return {
       id: code,
       name: `Chứng từ ${code}`,
       type: "pdf",
-      status: url ? "ok" : "missing",
-      url: passed ? undefined : url || undefined,
-      fileId: passed ? undefined : url || undefined,
-      note: passed ? "Chứng từ đã được PASS" : url ? undefined : "Chưa có URL trong PostgreSQL",
+      status: passed || files.length > 0 ? "ok" : "missing",
+      url: firstFile?.fileUrl,
+      urls,
+      files,
+      fileId: firstFile?.fileId || undefined,
+      note: passed ? "Chứng từ đã được PASS" : files.length > 0 ? undefined : "Chưa có URL trong PostgreSQL",
     };
   });
+}
+
+/** Supports parsed BE arrays plus legacy URL strings and serialized arrays. */
+function parseDocumentFiles(value: DriveDocumentValue | undefined): DriveDocumentFileRecord[] {
+  if (value == null || value === "") return [];
+  let entries: unknown = value;
+  if (typeof value === "string") {
+    try {
+      entries = JSON.parse(value) as unknown;
+    } catch {
+      entries = value.match(/https?:\/\/.*?(?=https?:\/\/|[\s,"\]]|$)/g) || [];
+    }
+  }
+  if (typeof entries === "string") entries = [entries];
+  if (!Array.isArray(entries)) return [];
+
+  const files = entries.flatMap((entry): DriveDocumentFileRecord[] => {
+    if (typeof entry === "string") {
+      return /^https?:\/\//i.test(entry.trim()) ? [{ fileUrl: entry.trim() }] : [];
+    }
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const file = entry as Record<string, unknown>;
+    if (typeof file.fileUrl !== "string" || !/^https?:\/\//i.test(file.fileUrl.trim())) return [];
+    return [{
+      fileUrl: file.fileUrl.trim(),
+      fileId: typeof file.fileId === "string" ? file.fileId : undefined,
+      fileName: typeof file.fileName === "string" ? file.fileName : undefined,
+      referenceCode: typeof file.referenceCode === "string" ? file.referenceCode : undefined,
+      idChiTiet: typeof file.idChiTiet === "string" ? file.idChiTiet : undefined,
+      requestId: typeof file.requestId === "string" ? file.requestId : undefined,
+      uploadedAt: typeof file.uploadedAt === "string" ? file.uploadedAt : undefined,
+    }];
+  });
+  return files.filter((file, index) => files.findIndex((other) => (
+    file.fileId && other.fileId ? file.fileId === other.fileId : file.fileUrl === other.fileUrl
+  )) === index);
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -327,7 +367,16 @@ export function moveCompletedOrder(orderCode: string): Promise<DriveDataResponse
   return requestJson<DriveDataResponse>(`moveCompletedOrder?orderCode=${encodeURIComponent(orderCode)}`, { method: "POST" });
 }
 
-export interface UploadDocumentPayload { action: "uploadDocument"; orderCode: string; documentCode: string; fileName: string; fileData: string; }
+export interface UploadDocumentPayload {
+  action: "uploadDocument";
+  orderCode: string;
+  documentCode: string;
+  fileName: string;
+  fileData: string;
+  referenceCode?: string;
+  idChiTiet?: string;
+  requestId: string;
+}
 export async function uploadDocument(payload: UploadDocumentPayload): Promise<DriveDataResponse> {
   const result = await requestJson<DriveDataResponse>("uploadDocument", {
     method: "POST",

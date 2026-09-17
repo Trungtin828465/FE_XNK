@@ -7,7 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { analyzeDocument, checkDocumentProgress, fetchReturnItems, getArchivedDocuments, launchCKLineTracking, launchEvergreenTracking, moveCompletedOrder, NOTIFICATIONS_SYNC_EVENT, SUMMARY_FIELDS, uploadDocument, type DocumentProgressResponse } from "@/services/shipmentApi";
 import { cancelPostgresShipment, createDatabaseRow, databaseEndpoints, listDatabaseRows, passDriveDocument, savePostgresBlOcrRows, savePostgresPiOcrRows, savePostgresPklOcrRow, savePostgresReturnItem, updateDatabaseRow, updatePostgresShipmentFields } from "@/services/postgresShipmentApi";
 import type { ArchivedDocumentsResponse, ReturnItem } from "@/types/shipment";
-import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord } from "@/types/postgresShipment";
+import type { CarrierRecord, ContainerDetailRecord, ContainerRecord, PostgresShipmentRelations, PurchaseDetailRecord, PurchaseItemCodeRecord, SupplierRecord, WarehouseRecord } from "@/types/postgresShipment";
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { recordActivity } from "@/services/activityLogApi";
 import { useSystemNotification } from "@/context/SystemNotificationContext";
@@ -626,7 +626,7 @@ const DETAIL_FIELD_GROUPS: DetailFieldGroup[] = [
     fields: [
       { sheetField: "BL NO.", labelKey: "billNumber" },
       { sheetField: "Mã Container", labelKey: "containerCode" },
-      { sheetField: "Số container", labelKey: "containerNumber" },
+      { sheetField: "Số container", labelKey: "containerCount" },
       { sheetField: "Hãng tàu", labelKey: "carrier" },
       { sheetField: "Cảng đi", labelKey: "departurePort" },
       { sheetField: "Cảng đến", labelKey: "destinationPort" },
@@ -1015,6 +1015,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [ocrUploadDocId, setOcrUploadDocId] = useState<string | null>(null);
   const [ocrUploadFile, setOcrUploadFile] = useState<File | null>(null);
   const [ocrUploadFileData, setOcrUploadFileData] = useState("");
+  const [ocrUploadRequestId, setOcrUploadRequestId] = useState("");
+  const pendingUploadRequestIds = React.useRef(new Map<string, string>());
   const [ocrUploadRows, setOcrUploadRows] = useState<Array<Record<string, string>>>([]);
   const [pklTargetDetailId, setPklTargetDetailId] = useState("");
   const [isOcrAnalyzing, setIsOcrAnalyzing] = useState(false);
@@ -1026,6 +1028,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [isSendingEmail] = useState(false);
   const [emailSent] = useState(false);
   const [isOpeningTracking, setIsOpeningTracking] = useState(false);
+  const [selectedTrackingCode, setSelectedTrackingCode] = useState("");
+  const [openDocumentFileListId, setOpenDocumentFileListId] = useState<string | null>(null);
   const evergreenTrackingInProgress = React.useRef(false);
   const ckLineTrackingInProgress = React.useRef(false);
   const [trackingFeedback, setTrackingFeedback] = useState<{
@@ -1036,6 +1040,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const [documentProgressError, setDocumentProgressError] = useState("");
   const [supplierOptions, setSupplierOptions] = useState<SupplierRecord[]>([]);
   const [carrierOptions, setCarrierOptions] = useState<CarrierRecord[]>([]);
+  const [warehouseOptions, setWarehouseOptions] = useState<WarehouseRecord[]>([]);
 
   const resetFilePreview = () => {
     setPreviewUrl(null);
@@ -1043,6 +1048,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setIsPreviewMaximized(false);
     setIsPreviewCollapsed(false);
     setLocalUploads({});
+    setOpenDocumentFileListId(null);
   };
 
   const handleModalClose = () => {
@@ -1058,7 +1064,12 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setIsPreviewMaximized(false);
     setIsPreviewCollapsed(false);
     setLocalUploads({});
+    setOpenDocumentFileListId(null);
   }, [isOpen, shipment?.id]);
+
+  useEffect(() => {
+    setSelectedTrackingCode("");
+  }, [shipment?.id]);
 
   useEffect(() => {
     if (previewUrl) setIsPreviewCollapsed(false);
@@ -1108,6 +1119,8 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     setOcrUploadDocId(null);
     setOcrUploadFile(null);
     setOcrUploadFileData("");
+    setOcrUploadRequestId("");
+    pendingUploadRequestIds.current.clear();
     setOcrUploadRows([]);
     setPklTargetDetailId("");
     setOcrUploadError("");
@@ -1133,6 +1146,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setSupplierOptions([]);
       setCarrierOptions([]);
     });
+    setWarehouseOptions([]);
+    void listDatabaseRows<WarehouseRecord>(databaseEndpoints.warehouses)
+      .then(setWarehouseOptions)
+      .catch(() => setWarehouseOptions([]));
     const databaseOrderId = shipment.database?.purchase.ma_hop_dong || shipment.orderCode;
     void fetchReturnItems(databaseOrderId)
       .then((results) => {
@@ -1242,12 +1259,32 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         : "bg-blue-light-500";
   const documentsSorted = [...(shipment.documents || [])].map((document) => (
     locallyPassedDocumentIds.includes(document.id)
-      ? { ...document, status: "ok" as const, url: undefined, fileId: undefined, note: "Chứng từ đã được PASS" }
+      ? { ...document, status: "ok" as const, url: undefined, urls: [], files: [], fileId: undefined, note: "Chứng từ đã được PASS" }
       : document
   )).sort((a, b) => {
     const orderA = DOCUMENT_DISPLAY_ORDER.indexOf(a.id.toUpperCase());
     const orderB = DOCUMENT_DISPLAY_ORDER.indexOf(b.id.toUpperCase());
     return (orderA < 0 ? Number.MAX_SAFE_INTEGER : orderA) - (orderB < 0 ? Number.MAX_SAFE_INTEGER : orderB);
+  });
+  const documentFileGroups = documentsSorted.map((document) => {
+    const archivedFiles = archived?.archived
+      ? (archived.files || []).filter((file) => file.fileName.toUpperCase().startsWith(`${shipment.orderCode}_${document.id}`.toUpperCase()))
+      : [];
+    const files = [
+      ...(document.files?.length ? document.files : (document.urls?.length ? document.urls : document.url ? [document.url] : []).map((url) => ({ fileUrl: url, referenceCode: undefined, idChiTiet: undefined, fileName: undefined }))).map((file, index) => ({
+        url: file.fileUrl,
+        label: [
+          file.referenceCode?.trim()
+            || shipment.database?.details.find((detail) => detail.id_chi_tiet === file.idChiTiet)?.ten_hang,
+          file.fileName?.trim() || t("documentFileIndex", { index: index + 1 }),
+        ].filter(Boolean).join(" — "),
+      })),
+      ...archivedFiles.map((file) => ({ url: file.fileUrl, label: file.fileName })),
+      ...(localUploads[document.id] && !document.url
+        ? [{ url: localUploads[document.id], label: t("documentFileIndex", { index: 1 }) }]
+        : []),
+    ].filter((file, index, allFiles) => file.url && allFiles.findIndex((other) => other.url === file.url) === index);
+    return { document, files };
   });
   const missingDocs = documentsSorted.filter(d => d.status === "missing" || d.status === "pending");
   const selectedMissingDocs = missingDocs.filter((doc) => selectedMissingDocIds.includes(doc.id));
@@ -1267,14 +1304,26 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   const isEvergreenTracking = carrierTrackingLink?.name === "EVERGREEN";
   const isCkLineTracking = carrierTrackingLink?.name === CK_LINE_CARRIER_CONFIG.name;
   const isCmaTracking = carrierTrackingLink?.name === "CMA CGM";
-  const evergreenContainerNo = overviewInfo.container?.split(",")[0].trim() || "";
-  const billTrackingCode = shipment.bill?.split(",")[0].trim() || "";
-  const containerTrackingCode = overviewInfo.container?.split(",")[0].trim() || "";
-  const trackingCode = isEvergreenTracking
-    ? evergreenContainerNo
-    : isCmaTracking
-      ? billTrackingCode || containerTrackingCode
-      : billTrackingCode;
+  const fallbackContainers = (overviewInfo.container || "").split(",").map((code) => code.trim()).filter(Boolean);
+  const fallbackBills = (shipment.bill || "").split(",").map((code) => code.trim()).filter(Boolean);
+  const containerCodes = [...new Set([
+    fallbackContainers[0],
+    ...(shipment.database?.bills.flatMap((bill) => bill.containers.map((container) => container.ma_container)) || []),
+  ].map((code) => code?.trim()).filter((code): code is string => Boolean(code)))];
+  const billCodes = [...new Set([
+    fallbackBills[0],
+    ...(shipment.database?.bills.map((bill) => bill.ma_bl) || []),
+  ].map((code) => code?.trim()).filter((code): code is string => Boolean(code)))];
+  const trackingOptions = isEvergreenTracking
+    ? (containerCodes.length ? containerCodes : fallbackContainers)
+    : (billCodes.length ? billCodes : fallbackBills);
+  const availableTrackingCodes = trackingOptions.length || !isCmaTracking
+    ? trackingOptions
+    : containerCodes.length ? containerCodes : fallbackContainers;
+  const trackingCode = availableTrackingCodes.includes(selectedTrackingCode)
+    ? selectedTrackingCode
+    : availableTrackingCodes[0] || "";
+  const evergreenContainerNo = isEvergreenTracking ? trackingCode : "";
   const carrierTrackingUrl = carrierTrackingLink?.buildUrl && trackingCode && !isEvergreenTracking && !isCkLineTracking
     ? carrierTrackingLink.buildUrl(trackingCode)
     : null;
@@ -1427,7 +1476,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handlePassDocument = async (docId: string) => {
-    if (!canPassDocuments || archived?.archived || passingDocumentId) return;
+    if (getOcrDocumentType(docId) || !canPassDocuments || archived?.archived || passingDocumentId) return;
     const confirmed = await confirm({
       title: t("passDocumentTitle"),
       message: t("passDocumentMessage", { document: docId, orderCode: shipment.orderCode }),
@@ -1485,6 +1534,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       if (!documentType) {
         setIsOcrSaving(true);
         for (const selectedFile of files) {
+          const fingerprint = `${shipment.orderCode}:${docId}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`;
+          const requestId = pendingUploadRequestIds.current.get(fingerprint) || crypto.randomUUID();
+          pendingUploadRequestIds.current.set(fingerprint, requestId);
           const fileData = await readFileAsBase64(selectedFile);
           await uploadDocument({
             action: "uploadDocument",
@@ -1492,6 +1544,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             documentCode: docId,
             fileName: selectedFile.name,
             fileData,
+            requestId,
           });
         }
         recordActivity(user, {
@@ -1508,10 +1561,14 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           setDocumentProgressError(progressError instanceof Error ? progressError.message : "Không thể tải lại tiến độ chứng từ");
         }
         notify(`Đã upload ${files.length} file chứng từ ${docId}`, "success");
+        files.forEach((selectedFile) => {
+          pendingUploadRequestIds.current.delete(`${shipment.orderCode}:${docId}:${selectedFile.name}:${selectedFile.size}:${selectedFile.lastModified}`);
+        });
         return;
       }
       setOcrUploadFile(file);
       setOcrUploadDocId(docId);
+      setOcrUploadRequestId(crypto.randomUUID());
       setIsOcrAnalyzing(true);
       const fileData = await readFileAsBase64(file);
       setOcrUploadFileData(fileData);
@@ -1545,6 +1602,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadFile(null);
       setOcrUploadDocId(null);
       setOcrUploadFileData("");
+      setOcrUploadRequestId("");
       setOcrUploadRows([]);
       setPklTargetDetailId("");
     } finally {
@@ -1555,7 +1613,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
   };
 
   const handleConfirmOcrUpload = async () => {
-    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !canUploadDocuments || isOcrSaving) return;
+    if (!ocrUploadDocId || !ocrUploadFile || !ocrUploadFileData || !ocrUploadRequestId || !canUploadDocuments || isOcrSaving) return;
     const documentType = getOcrDocumentType(ocrUploadDocId);
     const missingFields = ocrUploadRows.flatMap((row) => getMissingOcrFields(row, documentType));
     if (documentType === "PKL" && shipment.database?.details.length !== 1 && !pklTargetDetailId) {
@@ -1564,6 +1622,13 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
     if (missingFields.length > 0) {
       setOcrUploadError(t("requiredMissing", { fields: missingFields.map((field) => localizeSheetField(field, t)).join(", ") }));
       return;
+    }
+    if (documentType === "BL") {
+      const firstBillCode = ocrUploadRows[0]?.["BL NO."]?.trim().toUpperCase();
+      if (ocrUploadRows.some((row) => row["BL NO."]?.trim().toUpperCase() !== firstBillCode)) {
+        setOcrUploadError(t("oneBillPerFile"));
+        return;
+      }
     }
     setIsOcrSaving(true);
     setOcrUploadError("");
@@ -1574,6 +1639,9 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         documentCode: ocrUploadDocId,
         fileName: ocrUploadFile.name,
         fileData: ocrUploadFileData,
+        requestId: ocrUploadRequestId,
+        ...(documentType === "BL" ? { referenceCode: ocrUploadRows[0]?.["BL NO."]?.trim() } : {}),
+        ...(documentType === "PKL" ? { idChiTiet: pklTargetDetailId } : {}),
       });
 
       const data = Object.fromEntries(
@@ -1618,6 +1686,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       setOcrUploadFile(null);
       setOcrUploadDocId(null);
       setOcrUploadFileData("");
+      setOcrUploadRequestId("");
       setOcrUploadRows([]);
       setPklTargetDetailId("");
       notify(`Đã bổ sung và cập nhật chứng từ ${ocrUploadDocId}`, "success");
@@ -2080,7 +2149,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                 )}
                 {ocrUploadError && <p className="mt-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-600">{ocrUploadError}</p>}
                 <div className="mt-4 flex flex-wrap justify-end gap-2">
-                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadRows([]); setPklTargetDetailId(""); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
+                  <button type="button" onClick={() => { setOcrUploadFile(null); setOcrUploadDocId(null); setOcrUploadFileData(""); setOcrUploadRequestId(""); setOcrUploadRows([]); setPklTargetDetailId(""); setOcrUploadError(""); }} className="rounded-lg border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-white dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">{t("cancel")}</button>
                   <button type="button" onClick={handleConfirmOcrUpload} disabled={!canUploadDocuments || isOcrSaving || missingOcrFields.length > 0} title={missingOcrFields.length > 0 ? t("requiredMissing", { fields: missingOcrFields.map((field) => localizeSheetField(field, t)).join(", ") }) : undefined} className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-60">{isOcrSaving ? t("saving") : t("confirmSave")}</button>
                 </div>
               </>
@@ -2199,6 +2268,20 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                   <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
                 </svg>
               </div>
+
+              {availableTrackingCodes.length > 1 && (
+                <label className="mt-4 flex flex-col gap-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300">
+                  <span>{t(isEvergreenTracking ? "selectTrackingContainer" : "selectTrackingBill")}</span>
+                  <select
+                    value={trackingCode}
+                    onChange={(event) => setSelectedTrackingCode(event.target.value)}
+                    disabled={isOpeningTracking}
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-800 outline-none focus:border-brand-500 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                  >
+                    {availableTrackingCodes.map((code) => <option key={code} value={code}>{code}</option>)}
+                  </select>
+                </label>
+              )}
 
               {carrierTrackingLink && (isEvergreenTracking || isCkLineTracking || carrierTrackingUrl) ? (
                 <>
@@ -2467,10 +2550,11 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
               {documentsSorted.map(doc => {
                 const docStatus = DOC_STATUS_MAP[doc.status];
                 const isPassed = doc.note?.toUpperCase().includes("PASS") === true;
+                const documentFiles = documentFileGroups.find((group) => group.document.id === doc.id)?.files || [];
                 return (
                   <div
                     key={doc.id}
-                    className={`flex flex-col items-stretch gap-3 rounded-xl border p-3 transition-colors sm:flex-row sm:items-center sm:p-3.5 ${
+                    className={`flex flex-col items-stretch gap-3 rounded-xl border p-3 transition-colors sm:flex-row sm:flex-wrap sm:items-center sm:p-3.5 ${
                       doc.status === "missing"
                         ? "border-error-100 bg-error-50/50 dark:border-error-500/20 dark:bg-error-500/5"
                         : doc.status === "pending"
@@ -2503,14 +2587,21 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         <span className={`w-1.5 h-1.5 rounded-full ${docStatus?.dot}`} />
                         {isPassed ? t("passed") : t({ ok: "available", missing: "missing", pending: "pending", expired: "expired" }[doc.status] || "status")}
                       </span>
-                      {(doc.url || localUploads[doc.id]) && (
+                      {documentFiles.length > 0 && (
                         <button
                           type="button"
                           onClick={() => {
-                            const sourceUrl = localUploads[doc.id] || doc.url;
-                            setPreviewUrl(sourceUrl ? toDocumentPreviewUrl(sourceUrl) : null);
+                            if (documentFiles.length > 1) {
+                              setOpenDocumentFileListId((current) => current === doc.id ? null : doc.id);
+                              return;
+                            }
+                            setOpenDocumentFileListId(null);
+                            setPreviewUrl(toDocumentPreviewUrl(documentFiles[0].url));
                             setPreviewName(doc.name);
+                            setIsPreviewCollapsed(false);
                           }}
+                          aria-label={t("viewDocument")}
+                          aria-expanded={documentFiles.length > 1 ? openDocumentFileListId === doc.id : undefined}
                           className="flex items-center justify-center w-7 h-7 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700 transition-colors"
                         >
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-gray-500">
@@ -2525,7 +2616,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                           {isOcrAnalyzing && ocrUploadDocId === doc.id ? t("analyzingDocument") : doc.status === "ok" ? t("uploadAnother") : localUploads[doc.id] ? t("uploadAnother") : t("uploadDocument")}
                         </button>
                       )}
-                      {!archived?.archived && canPassDocuments && doc.status !== "ok" && (
+                      {!archived?.archived && canPassDocuments && doc.status !== "ok" && !getOcrDocumentType(doc.id) && (
                         <button
                           type="button"
                           disabled={Boolean(passingDocumentId) || isOcrAnalyzing || isOcrSaving}
@@ -2536,6 +2627,29 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                         </button>
                       )}
                     </div>
+                    {openDocumentFileListId === doc.id && documentFiles.length > 1 && (
+                      <div className="w-full rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-900">
+                        <p className="px-2 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400">{t("selectDocumentFile")}</p>
+                        <div className="max-h-48 space-y-1 overflow-y-auto custom-scrollbar">
+                          {documentFiles.map((file, index) => (
+                            <button
+                              key={`${file.url}-${index}`}
+                              type="button"
+                              onClick={() => {
+                                setPreviewUrl(toDocumentPreviewUrl(file.url));
+                                setPreviewName(`${doc.name} — ${file.label}`);
+                                setIsPreviewCollapsed(false);
+                                setOpenDocumentFileListId(null);
+                              }}
+                              className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                              <span className="shrink-0 font-semibold text-brand-600 dark:text-brand-400">{doc.id === "BL" ? "B/L" : doc.id} {index + 1}</span>
+                              <span className="min-w-0 truncate text-gray-500 dark:text-gray-400">{file.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -2627,11 +2741,30 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[1].labelKey)}</h4>
                   </div>
                   <div className="grid gap-3 md:grid-cols-3">
-                    {RETURN_FIELD_GROUPS[1].fields.map(({ key, labelKey }, index) => (
+                    {RETURN_FIELD_GROUPS[1].fields.map(({ key, labelKey }) => (
                       <label key={key} className="relative flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                         <span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-brand-400" />{t(labelKey)}</span>
-                        <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "tenKho"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
-                        {index < RETURN_FIELD_GROUPS[1].fields.length - 1 && <span className="absolute -right-2 top-[2.4rem] hidden text-gray-300 md:block"></span>}
+                        {key === "idKho" ? (
+                          <select
+                            value={returnForm?.idKho || ""}
+                            disabled={!canEditReturnItem || !isReturnEditing}
+                            onChange={(event) => {
+                              const warehouse = warehouseOptions.find((item) => item.id_kho === event.target.value);
+                              setReturnForm((current) => current ? { ...current, idKho: event.target.value, tenKho: warehouse?.ten_kho || "" } : current);
+                            }}
+                            className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
+                          >
+                            <option value="">{t("selectWarehouse")}</option>
+                            {returnForm?.idKho && !warehouseOptions.some((warehouse) => warehouse.id_kho === returnForm.idKho) && (
+                              <option value={returnForm.idKho}>{returnForm.idKho}</option>
+                            )}
+                            {warehouseOptions.map((warehouse) => (
+                              <option key={warehouse.id_kho} value={warehouse.id_kho}>{warehouse.id_kho} — {warehouse.ten_kho}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input type="text" value={returnForm?.[key] || ""} disabled={!canEditReturnItem || !isReturnEditing || key === "tenKho"} onChange={(event) => setReturnForm((current) => current ? { ...current, [key]: event.target.value } : current)} className="min-w-0 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white disabled:cursor-not-allowed disabled:opacity-70 dark:border-gray-700 dark:bg-gray-900 dark:text-white" />
+                        )}
                       </label>
                     ))}
                   </div>
@@ -2642,7 +2775,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
                     <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-50 text-[10px] font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-300">03</span>
                     <h4 className="text-sm font-semibold text-gray-800 dark:text-white">{t(RETURN_FIELD_GROUPS[2].labelKey)}</h4>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 md:grid-cols-3">
                     {RETURN_FIELD_GROUPS[2].fields.map(({ key, labelKey }) => (
                       <label key={key} className="flex min-w-0 flex-col gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
                         <span>{t(labelKey)}</span>

@@ -83,23 +83,35 @@ export interface ContainerTransportRecord {
   ghi_chu?: string | null;
 }
 
+export interface DriveDocumentFileRecord {
+  fileId?: string | null;
+  fileName?: string | null;
+  fileUrl: string;
+  referenceCode?: string | null;
+  idChiTiet?: string | null;
+  requestId?: string | null;
+  uploadedAt?: string | null;
+}
+
+export type DriveDocumentValue = string | Array<DriveDocumentFileRecord | string> | null;
+
 export interface DriveDocumentRecord {
   order_code: string;
-  pi?: string | null;
-  inv?: string | null;
-  pkl?: string | null;
-  bl?: string | null;
-  co?: string | null;
-  hc?: string | null;
-  don_kd?: string | null;
-  bb_lm?: string | null;
-  phi_tk?: string | null;
-  thue_nk?: string | null;
-  tk?: string | null;
-  "15b"?: string | null;
-  qdtq?: string | null;
-  mv?: string | null;
-  tra_cong?: string | null;
+  pi?: DriveDocumentValue;
+  inv?: DriveDocumentValue;
+  pkl?: DriveDocumentValue;
+  bl?: DriveDocumentValue;
+  co?: DriveDocumentValue;
+  hc?: DriveDocumentValue;
+  don_kd?: DriveDocumentValue;
+  bb_lm?: DriveDocumentValue;
+  phi_tk?: DriveDocumentValue;
+  thue_nk?: DriveDocumentValue;
+  tk?: DriveDocumentValue;
+  "15b"?: DriveDocumentValue;
+  qdtq?: DriveDocumentValue;
+  mv?: DriveDocumentValue;
+  tra_cong?: DriveDocumentValue;
   status?: number | string | null;
   date_time?: string | null;
 }

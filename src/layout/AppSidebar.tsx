@@ -74,7 +74,7 @@ const AppSidebar: React.FC = () => {
               {showText && <span className="menu-item-text">{t("importExport")}</span>}
             </Link>
           </li>
-          <li>
+          {/* <li>
             <Link
               href="/user-guide"
               className={`menu-item group ${
@@ -90,7 +90,7 @@ const AppSidebar: React.FC = () => {
               </span>
               {showText && <span className="menu-item-text">{t("userGuide")}</span>}
             </Link>
-          </li>
+          </li> */}
           {canViewLogs && (
             <li>
               <Link
