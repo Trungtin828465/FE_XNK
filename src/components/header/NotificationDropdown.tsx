@@ -60,7 +60,7 @@ function getNotificationKind(row: NotificationRow): NotificationKind | null {
   if (delivered) return "delivered";
 
   const exceeded = values.some((value) =>
-    ["VUOT_LO_TRINH", "VUOT_TIEN_DO", "OVERDUE", "PROGRESS_EXCEEDED"].includes(value)
+    ["VUOT_LO_TRINH", "THIEU_CHUNG_TU", "VUOT_TIEN_DO", "OVERDUE", "PROGRESS_EXCEEDED"].includes(value)
     || value.includes("VUOT_LO_TRINH")
     || value.includes("VUOT_TIEN_DO"),
   );
@@ -213,9 +213,9 @@ export default function NotificationDropdown() {
       <span className="block min-w-0 flex-1">
         <span className="mb-1 block text-sm font-medium text-gray-800 dark:text-white/90">{item.title}</span>
         <span className={`block text-xs text-gray-500 dark:text-gray-400 ${compact ? "line-clamp-2" : ""}`}>{item.body}</span>
-        {item.updatedBy && !compact && (
+        {/* {item.updatedBy && !compact && (
           <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-400">{t("notificationStage", { stage: item.updatedBy })}</span>
-        )}
+        )} */}
         <span className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
           <span className="font-medium text-gray-600 dark:text-gray-300">{item.orderCode || "—"}</span>
           <span className="h-1 w-1 rounded-full bg-gray-400" />
@@ -243,8 +243,8 @@ export default function NotificationDropdown() {
         </svg>
       </button>
 
-      <Dropdown isOpen={isOpen} onClose={() => setIsOpen(false)} className="absolute -right-[240px] mt-[17px] flex w-[350px] flex-col rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-lg dark:border-gray-800 dark:bg-gray-dark sm:w-[361px] lg:right-0">
-        <div className="mb-3 flex items-center justify-between border-b border-gray-100 pb-3 dark:border-gray-700">
+      <Dropdown isOpen={isOpen} onClose={() => setIsOpen(false)} className="absolute -right-[240px] mt-[17px] flex max-h-[80dvh] w-[350px] flex-col rounded-2xl border border-gray-200 bg-white p-3 shadow-theme-lg dark:border-gray-800 dark:bg-gray-dark sm:w-[361px] lg:right-0">
+        <div className="mb-3 flex shrink-0 items-center justify-between border-b border-gray-100 pb-3 dark:border-gray-700">
           <div>
             <h5 className="text-lg font-semibold text-gray-800 dark:text-gray-200">{t("notifications")}</h5>
             <p className="text-xs text-gray-500 dark:text-gray-400">{t("unreadNotifications", { count: unreadCount })}</p>
@@ -252,7 +252,7 @@ export default function NotificationDropdown() {
           <button type="button" onClick={() => setIsOpen(false)} aria-label={t("closeNotifications")} className="text-2xl leading-none text-gray-500 hover:text-gray-700 dark:text-gray-400">×</button>
         </div>
 
-        <div className="max-h-[420px] overflow-y-auto custom-scrollbar">
+        <div className="min-h-0 overflow-y-auto overscroll-contain pr-1 custom-scrollbar">
           {hasNewNotification && <div className="mb-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2 text-xs font-medium text-brand-700 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-300">{t("newUploadNotification")}</div>}
           {error && <div className="mb-2 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-xs font-medium text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">{error}</div>}
 
@@ -278,12 +278,12 @@ export default function NotificationDropdown() {
         </div>
       </Dropdown>
 
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} className="mx-4 my-4 flex max-h-[90vh] max-w-3xl flex-col overflow-hidden">
-        <div className="border-b border-gray-100 px-6 pb-4 pt-6 dark:border-gray-800">
+      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden" className="mx-4 my-4 flex h-[90dvh] max-h-[720px] max-w-3xl flex-col overflow-hidden">
+        <div className="shrink-0 border-b border-gray-100 px-6 pb-4 pt-6 dark:border-gray-800">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t("allNotifications")}</h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">{t("systemNotificationCount", { count: notifications.length })}</p>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 custom-scrollbar">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5 custom-scrollbar">
           {error && (
             <div className="mb-3 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-300">
               {error}

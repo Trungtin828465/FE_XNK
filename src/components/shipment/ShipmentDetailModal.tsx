@@ -1988,10 +1988,10 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
       isOpen={isOpen}
       onClose={handleModalClose}
       contentClassName="flex min-h-0 flex-1 flex-col overflow-hidden"
-      className={`mx-2 my-2 flex max-h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl flex-col overflow-hidden transition-[width,transform] duration-300 sm:mx-4 sm:my-4 sm:max-h-[94vh] sm:w-full ${previewUrl && !isPreviewCollapsed && !isPreviewMaximized ? "md:w-[calc(50vw-1.5rem)] md:max-w-none md:-translate-x-1/2" : ""}`}
+      className={`mx-2 my-2 flex h-[calc(100dvh-1rem)] w-[calc(100%-1rem)] max-w-5xl flex-col overflow-hidden transition-[width,transform] duration-300 sm:mx-4 sm:my-4 sm:h-[94vh] sm:w-full ${previewUrl && !isPreviewCollapsed && !isPreviewMaximized ? "md:w-[calc(50vw-1.5rem)] md:max-w-none md:-translate-x-1/2" : ""}`}
     >
       {/* Header */}
-      <div className="flex flex-col gap-3 border-b border-gray-100 px-4 pb-4 pt-5 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pb-4 sm:pt-6">
+      <div className="flex shrink-0 flex-col gap-3 border-b border-gray-100 px-4 pb-4 pt-5 dark:border-gray-800 sm:flex-row sm:items-start sm:justify-between sm:px-6 sm:pb-4 sm:pt-6">
         <div className="min-w-0 flex flex-col gap-1 pr-10 sm:pr-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2 sm:gap-3">
             <h2 className="min-w-0 break-all text-base font-bold tracking-wide text-gray-900 dark:text-white sm:text-lg font-mono">
@@ -2160,7 +2160,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
         {/* ── OVERVIEW ── */}
         {activeTab === "overview" && (
-          <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] min-w-0 flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)] sm:gap-6 sm:pr-1">
+          <div className="flex min-w-0 flex-col gap-4 sm:gap-6">
             {/* Key info grid */}
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02]">
@@ -2243,7 +2243,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
         {/* ── JOURNEY ── */}
         {activeTab === "journey" && (
-          <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-6 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
+          <div className="flex flex-col gap-6">
             <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02] sm:p-5">
               <div className="flex items-start justify-between gap-4">
                 <div>
@@ -2453,7 +2453,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
         {/* ── DOCUMENTS ── */}
         {activeTab === "documents" && (
-          <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
+          <div className="flex flex-col gap-4">
             {canArchiveDocuments && isDocumentsComplete && !archived?.archived && (
               <button type="button" onClick={handleArchive} disabled={isArchiveLoading} className="flex w-full items-center justify-center rounded-xl bg-success-500 px-4 py-3 text-sm font-semibold text-white hover:bg-success-600 disabled:cursor-not-allowed disabled:opacity-60">
                 {isArchiveLoading ? t("archiving") : t("archiveDocuments")}
@@ -2546,7 +2546,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
             )}
 
             {/* Document list */}
-            <div className="max-h-[320px] overflow-y-auto pr-1 custom-scrollbar flex flex-col gap-2">
+            <div className="flex flex-col gap-2">
               {documentsSorted.map(doc => {
                 const docStatus = DOC_STATUS_MAP[doc.status];
                 const isPassed = doc.note?.toUpperCase().includes("PASS") === true;
@@ -2662,7 +2662,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
         {/* ── RETURN ITEM ── */}
         {activeTab === "return" && (
-          <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
+          <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-gray-800 dark:text-white">{t("emptyReturnInformation")}</p>
@@ -2800,7 +2800,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
         {/* ── DETAILS ── */}
         {activeTab === "details" && (
-          <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
+          <div className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-semibold text-gray-800 dark:text-white">{t("shipmentDetails")}</p>
@@ -3037,7 +3037,7 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
 
         {/* ── FOLDER ── */}
         {activeTab === "folder" && (
-          <div className="flex min-h-0 max-h-[calc(100dvh-13rem)] flex-col gap-4 overflow-y-auto pr-1 custom-scrollbar sm:max-h-[calc(92vh-180px)]">
+          <div className="flex flex-col gap-4">
             <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-gray-800 dark:bg-white/[0.02] sm:p-5">
               <div className="mb-4 flex items-start gap-3 sm:items-center sm:gap-4">
                 <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-warning-100 dark:bg-warning-500/10 sm:h-12 sm:w-12">
