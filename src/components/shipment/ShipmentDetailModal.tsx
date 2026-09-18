@@ -237,8 +237,8 @@ const CARRIER_TRACKING_LINKS: CarrierTrackingLink[] = [
     name: "Yang Ming",
     aliases: ["yang ming", "yangming", "yml"],
     requiresManualCode: false,
-    usesBackendApi: true,
-    buildUrl: (trackingCode) => `https://www.yangming.com/api/CargoTracking/GetTracking?paramTrackNo=${trackingCode}&paramTrackPosition=SEARCH&paramRefNo=${trackingCode}`,
+    usesBackendApi: false,
+    buildUrl: (trackingCode) => `https://www.yangming.com/en/esolution/cargo_tracking?service=${encodeURIComponent(trackingCode)}`,
   },
   {
     ...CK_LINE_CARRIER_CONFIG,
