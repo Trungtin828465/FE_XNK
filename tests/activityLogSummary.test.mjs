@@ -19,3 +19,9 @@ test("transport and account actions keep a useful identifier", () => {
   assert.equal(activityLogSummary("EDIT_RETURN_ITEM", "Cập nhật vận chuyển Container MSCU1234567 của đơn HD001", ""), "Đơn HD001 · MSCU1234567");
   assert.equal(activityLogSummary("REGISTER_USER", "Tạo tài khoản thanh; role xnk; session edit", "", "en"), "Account thanh");
 });
+
+test("shipment edit logs retain the changed fields and values", () => {
+  const detail = "Đơn VTF008; Cảng đến: HCM → HP | Số kiện: 100 → 120";
+  assert.equal(activityLogSummary("EDIT_SHIPMENT_DETAILS", detail, "ShipmentDetailModal/Details"), "Đơn VTF008 · Cảng đến: HCM → HP; Số kiện: 100 → 120");
+  assert.equal(activityLogSummary("EDIT_SHIPMENT_DETAILS", detail, "ShipmentDetailModal/Details", "en"), "Order VTF008 · Cảng đến: HCM → HP; Số kiện: 100 → 120");
+});

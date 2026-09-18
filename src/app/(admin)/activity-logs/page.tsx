@@ -117,7 +117,7 @@ export default function ActivityLogsPage() {
           <div className="divide-y divide-gray-100 dark:divide-gray-800">
             {displayedLogs.map((log, index) => {
               const summary = activityLogSummary(log.action, log.detail, log.location, language);
-              const hasMore = Boolean(log.location || (log.detail && log.detail !== summary));
+              const visibleDetail = log.detail || summary;
               return (
                 <article key={log.id || `log-${currentPage}-${index}`} className="px-4 py-4 transition-colors hover:bg-gray-50/60 dark:hover:bg-white/[0.02] sm:px-5">
                   <div className="flex gap-3">
@@ -128,19 +128,8 @@ export default function ActivityLogsPage() {
                         <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{actionLabel(log.action, t)}</span>
                         <time dateTime={log.createdAt} className="text-xs text-gray-500 sm:ml-auto">{dateTime(log.createdAt, language)}</time>
                       </div>
-                      {summary && <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">{summary}</p>}
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-gray-400">
-                        {(log.role || log.session) && <span>{[log.role, log.session].filter(Boolean).join(" · ")}</span>}
-                        {hasMore && (
-                          <details className="group w-full pt-1">
-                            <summary className="w-fit cursor-pointer font-medium text-brand-600 hover:underline dark:text-brand-400">{t("logViewDetails")}</summary>
-                            <div className="mt-2 space-y-1 rounded-lg bg-gray-50 p-3 text-xs text-gray-600 dark:bg-gray-800/70 dark:text-gray-300">
-                              {log.detail && log.detail !== summary && <p className="break-words">{log.detail}</p>}
-                              {log.location && <p className="break-all text-gray-400">{log.location}</p>}
-                            </div>
-                          </details>
-                        )}
-                      </div>
+                      {visibleDetail && <p className="mt-1 break-words text-sm leading-6 text-gray-600 dark:text-gray-300">{visibleDetail}</p>}
+                      {(log.role || log.session) && <p className="mt-1 text-xs text-gray-400">{[log.role, log.session].filter(Boolean).join(" · ")}</p>}
                     </div>
                   </div>
                 </article>

@@ -18,6 +18,7 @@ import { findBestCatalogMatch, normalizeCatalogText } from "@/utils/masterDataMa
 import { DESTINATION_PORT_OPTIONS, isDestinationPort } from "@/config/shipmentCatalogOptions";
 import { toDocumentPreviewUrl } from "@/utils/documentPreview";
 import { backendApiUrl } from "@/services/backendApiUrl";
+import { shouldValidateContainerPackages } from "@/utils/containerPackageValidation";
 
 interface ShipmentDetailModalProps {
   shipment: Shipment | null;
@@ -331,6 +332,21 @@ function describeFieldChanges(
     return `${field}: ${oldValue} → ${nextValue}`;
   });
   return `Đơn ${orderCode}; thay đổi: ${details.join(" | ")}`;
+}
+
+function describeEditedFields(
+  subject: string,
+  original: object | undefined,
+  updated: object,
+  labels: Record<string, string>,
+): string[] {
+  const beforeFields = original as Record<string, unknown> | undefined;
+  const afterFields = updated as Record<string, unknown>;
+  return Object.entries(labels).flatMap(([field, label]) => {
+    const before = String(beforeFields?.[field] ?? "").trim();
+    const after = String(afterFields[field] ?? "").trim();
+    return before === after ? [] : [`${subject} ${label}: ${before || "(trống)"} → ${after || "(trống)"}`];
+  });
 }
 
 function formatDate(iso?: string): string {
@@ -852,6 +868,7 @@ function ContainerCargoDetailsTable({
     .map((item) => ({ item, purchaseDetail })));
   const allocatedPackages = details.reduce((total, detail) => total + numericAmount(detail.so_kien), 0);
   const packagesMatch = Math.abs(allocatedPackages - expectedPackages) < 0.0001;
+  const allocationPending = !details.some((detail) => numericAmount(detail.so_kien) > 0);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-700 dark:bg-white/[0.02]">
@@ -933,8 +950,8 @@ function ContainerCargoDetailsTable({
           <tfoot className="border-t border-gray-200 bg-gray-50/80 dark:border-gray-700 dark:bg-gray-900/60">
             <tr>
               <td colSpan={5} className="px-4 py-3 text-right text-xs font-semibold text-gray-500 dark:text-gray-400">{translate("containerPackageComparison")}</td>
-              <td colSpan={3} className={`px-4 py-3 text-sm font-bold ${packagesMatch ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400"}`}>
-                {formatQuantity(allocatedPackages)} / {formatQuantity(expectedPackages)} {packagesMatch ? translate("quantityMatched") : translate("quantityNotMatched")}
+              <td colSpan={3} className={`px-4 py-3 text-sm font-bold ${allocationPending ? "text-gray-500 dark:text-gray-400" : packagesMatch ? "text-success-600 dark:text-success-400" : "text-error-600 dark:text-error-400"}`}>
+                {formatQuantity(allocatedPackages)} / {formatQuantity(expectedPackages)} {allocationPending ? translate("quantityNotAllocated") : packagesMatch ? translate("quantityMatched") : translate("quantityNotMatched")}
               </td>
             </tr>
           </tfoot>
@@ -1786,18 +1803,35 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
         String(detail[field as keyof ContainerDetailRecord] ?? "") !== String(original[field as keyof ContainerDetailRecord] ?? "")
       ));
     });
-    const invalidContainerDetailIndex = containerDetailForms.findIndex((detail) => !detail.id_bl_container || !detail.id_item_code);
+    const containerAllocationChanged = newContainerDetails.length > 0 || changedContainerDetails.some((detail) => {
+      const original = originalContainerDetails.find((item) => item.id_chi_tiet_container === detail.id_chi_tiet_container);
+      return !original || detail.id_bl_container !== original.id_bl_container || detail.id_item_code !== original.id_item_code
+        || numericAmount(detail.so_kien) !== numericAmount(original.so_kien);
+    });
+    const purchaseQuantityChanged = newPurchaseDetails.some((detail) => numericAmount(detail.so_kien) !== 0)
+      || changedPurchaseDetails.some((detail) => {
+        const original = shipment.database?.details.find((item) => item.id_chi_tiet === detail.id_chi_tiet);
+        return numericAmount(detail.so_kien) !== numericAmount(original?.so_kien);
+      });
+    const touchedContainerDetailIds = new Set([...newContainerDetails, ...changedContainerDetails].map((detail) => detail.id_chi_tiet_container));
+    const invalidContainerDetailIndex = containerDetailForms.findIndex((detail) =>
+      touchedContainerDetailIds.has(detail.id_chi_tiet_container) && (!detail.id_bl_container || !detail.id_item_code));
     if (invalidContainerDetailIndex >= 0) {
       notify(`Dòng chi tiết container ${invalidContainerDetailIndex + 1} chưa chọn container hoặc Item Code`, "error");
       return;
     }
     const expectedPackageTotal = purchaseDetailForms.reduce((total, detail) => total + numericAmount(detail.so_kien), 0);
     const allocatedPackageTotal = containerDetailForms.reduce((total, detail) => total + numericAmount(detail.so_kien), 0);
-    if (Math.abs(expectedPackageTotal - allocatedPackageTotal) >= 0.0001) {
+    const mustValidatePackages = shouldValidateContainerPackages(
+      containerDetailForms.some((detail) => numericAmount(detail.so_kien) > 0),
+      purchaseQuantityChanged,
+      containerAllocationChanged,
+    );
+    if (mustValidatePackages && Math.abs(expectedPackageTotal - allocatedPackageTotal) >= 0.0001) {
       notify(t("containerQuantityMismatch", { allocated: formatQuantity(allocatedPackageTotal), expected: formatQuantity(expectedPackageTotal) }), "error");
       return;
     }
-    const mismatchedProduct = purchaseDetailForms.find((purchaseDetail) => {
+    const mismatchedProduct = mustValidatePackages && purchaseDetailForms.find((purchaseDetail) => {
       const itemIds = new Set(purchaseDetail.itemCodes
         .filter((item) => !item.id_item_code.startsWith("new-item-"))
         .map((item) => item.id_item_code));
@@ -1895,12 +1929,43 @@ export default function ShipmentDetailModal({ shipment, isOpen, onClose, onRefre
           net_weight: detail.net_weight === "" ? null : detail.net_weight,
         });
       }
+      const logChanges = [
+        ...Object.entries(data).map(([field, value]) => {
+          const before = getOriginalSummaryValue(shipment.summaryFields, field).trim();
+          return `${field}: ${before || "(trống)"} → ${value.trim() || "(trống)"}`;
+        }),
+        ...newPurchaseDetails.map((detail) => `thêm hàng ${detail.ten_hang}`),
+        ...newPurchaseDetails.flatMap((detail) => detail.itemCodes
+          .filter((item) => item.item_code.trim())
+          .map((item) => `hàng ${detail.ten_hang} Item Code ${item.item_code}${item.ma_nha_may ? ` (${item.ma_nha_may})` : ""}`)),
+        ...changedPurchaseDetails.flatMap((detail) => describeEditedFields(
+          `hàng ${detail.ten_hang}`,
+          shipment.database?.details.find((item) => item.id_chi_tiet === detail.id_chi_tiet),
+          detail,
+          { ten_hang: "Tên hàng", so_kien: "Số kiện", net_weight: "NET", don_gia: "Đơn giá", tong_gia: "Tổng tiền" },
+        )),
+        ...newItemCodes.map(({ item }) => `thêm Item Code ${item.item_code}${item.ma_nha_may ? ` (${item.ma_nha_may})` : ""}`),
+        ...changedItemCodes.flatMap((item) => {
+          const original = shipment.database?.details.flatMap((detail) => detail.itemCodes).find((candidate) => candidate.id_item_code === item.id_item_code);
+          return describeEditedFields(
+            `Item Code ${original?.item_code || item.id_item_code}`,
+            original,
+            item,
+            { item_code: "Mã", ma_nha_may: "Mã nhà máy" },
+          );
+        }),
+        ...newContainerDetails.map((detail) => `thêm chi tiết container ${detail.id_bl_container}: ${detail.so_kien || 0} kiện`),
+        ...changedContainerDetails.flatMap((detail) => describeEditedFields(
+          `container ${detail.id_bl_container}`,
+          originalContainerDetails.find((item) => item.id_chi_tiet_container === detail.id_chi_tiet_container),
+          detail,
+          { id_bl_container: "Container", id_item_code: "Item Code", so_kien: "Số kiện", don_vi_kien: "Đơn vị", net_weight: "NET" },
+        )),
+      ];
       recordActivity(user, {
         action: "EDIT_SHIPMENT_DETAILS",
         location: "ShipmentDetailModal/Details",
-        detail: changedPurchaseDetails.length > 0 || changedItemCodes.length > 0 || newItemCodes.length > 0 || newPurchaseDetails.length > 0 || changedContainerDetails.length > 0 || newContainerDetails.length > 0
-          ? `Đơn ${shipment.orderCode}; thêm ${newPurchaseDetails.length} dòng hàng, cập nhật ${changedPurchaseDetails.length} dòng hàng, thêm ${newItemCodes.length} và sửa ${changedItemCodes.length} Item Code, thêm ${newContainerDetails.length} và sửa ${changedContainerDetails.length} chi tiết container`
-          : describeFieldChanges(shipment.orderCode, Object.entries(data), shipment.summaryFields),
+        detail: `Đơn ${shipment.orderCode}; ${logChanges.join(" | ")}`,
       });
       await onRefresh?.();
       setIsDetailsEditing(false);
