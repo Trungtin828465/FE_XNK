@@ -17,7 +17,6 @@ import {
   updateDatabaseRow,
 } from "@/services/postgresShipmentApi";
 import type { EvergreenTrackingLaunchResponse } from "@/utils/evergreenTracking";
-import { buildCKLineTrackingPayload, type CKLineTrackingLaunchResponse } from "@/utils/ckLineTracking";
 import type { DriveDocumentFileRecord, DriveDocumentRecord, DriveDocumentValue, NotificationRecord, PostgresShipmentRelations, PostgresShipmentSnapshot, PurchaseRecord } from "@/types/postgresShipment";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
 
@@ -401,18 +400,6 @@ export function launchEvergreenTracking(containerNo: string): Promise<EvergreenT
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({ containerNo }),
-  });
-}
-
-export function launchCKLineTracking(code: string): Promise<CKLineTrackingLaunchResponse> {
-  const token = getStoredUser()?.token?.trim();
-  return requestJson<CKLineTrackingLaunchResponse>("tracking/ckline", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(buildCKLineTrackingPayload(code)),
   });
 }
 
