@@ -2,6 +2,7 @@ import type { AuthUser } from "@/types/auth";
 import { getStoredUser } from "@/services/authApi";
 import { backendApiUrl } from "@/services/backendApiUrl";
 import { createHttpApiError, createInvalidResponseError, createNetworkApiError, parseApiResponse } from "@/utils/apiError";
+import { activityLogSummary } from "@/utils/activityLogSummary";
 
 
 export interface ActivityLogPayload {
@@ -60,30 +61,34 @@ function normalizeLog(row: unknown, index: number): ActivityLog | null {
 export async function getActivityLogs(): Promise<ActivityLog[]> {
   const apiPath = "/api/auth/activity-logs";
   const token = getStoredUser()?.token?.trim();
-  let response: Response;
-  try {
-    response = await fetch(backendApiUrl(apiPath), {
-      method: "GET",
-      headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      cache: "no-store",
-    });
-  } catch (error) {
-    if (error instanceof TypeError) throw createNetworkApiError("Nhật ký", "GET", apiPath, error);
-    throw error;
+  const pageSize = 500;
+  const logs: ActivityLog[] = [];
+  for (let offset = 0; ; offset += pageSize) {
+    const pagePath = `${apiPath}?limit=${pageSize}&offset=${offset}`;
+    let response: Response;
+    try {
+      response = await fetch(backendApiUrl(pagePath), {
+        method: "GET",
+        headers: { Accept: "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        cache: "no-store",
+      });
+    } catch (error) {
+      if (error instanceof TypeError) throw createNetworkApiError("Nhật ký", "GET", pagePath, error);
+      throw error;
+    }
+
+    const { data: result, nonJsonPreview } = await parseApiResponse(response);
+    if (!response.ok) throw createHttpApiError("Nhật ký", "GET", pagePath, response, result, nonJsonPreview);
+    if (result === null) throw createInvalidResponseError("Nhật ký", "GET", pagePath, nonJsonPreview);
+    const rows = findLogRows(result);
+    logs.push(...rows.map((row, index) => normalizeLog(row, offset + index)).filter((log): log is ActivityLog => log !== null));
+    if (rows.length < pageSize) break;
   }
-
-  const { data: result, nonJsonPreview } = await parseApiResponse(response);
-  if (!response.ok) throw createHttpApiError("Nhật ký", "GET", apiPath, response, result, nonJsonPreview);
-  if (result === null) throw createInvalidResponseError("Nhật ký", "GET", apiPath, nonJsonPreview);
-
-  return findLogRows(result)
-    .map(normalizeLog)
-    .filter((log): log is ActivityLog => log !== null)
-    .sort((a, b) => {
-      const timeA = Date.parse(a.createdAt);
-      const timeB = Date.parse(b.createdAt);
-      return (Number.isFinite(timeB) ? timeB : 0) - (Number.isFinite(timeA) ? timeA : 0);
-    });
+  return logs.sort((a, b) => {
+    const timeA = Date.parse(a.createdAt);
+    const timeB = Date.parse(b.createdAt);
+    return (Number.isFinite(timeB) ? timeB : 0) - (Number.isFinite(timeA) ? timeA : 0);
+  });
 }
 
 export async function createActivityLog(user: AuthUser | null, payload: ActivityLogPayload): Promise<void> {
@@ -97,6 +102,7 @@ export async function createActivityLog(user: AuthUser | null, payload: Activity
   try {
     response = await fetch(backendApiUrl(apiPath), {
       method: "POST",
+      keepalive: true,
       headers: {
         "Content-Type": "application/json",
         ...(user.token ? { Authorization: `Bearer ${user.token}` } : {}),
@@ -105,7 +111,7 @@ export async function createActivityLog(user: AuthUser | null, payload: Activity
         userId: user.id,
         action: payload.action.slice(0, 255),
         location: (payload.location || "").slice(0, 255),
-        detail: (payload.detail || "").slice(0, 255),
+        detail: activityLogSummary(payload.action, payload.detail || "", payload.location || "").slice(0, 255),
       }),
     });
   } catch (error) {

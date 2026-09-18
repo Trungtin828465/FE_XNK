@@ -2,60 +2,53 @@
 
 import { canPerformShipmentAction } from "@/config/shipmentActionPermissions";
 import { useAuth } from "@/context/AuthContext";
+import { useLanguage } from "@/context/LanguageContext";
 import { getActivityLogs, type ActivityLog } from "@/services/activityLogApi";
+import { activityLogSummary } from "@/utils/activityLogSummary";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useLanguage } from "@/context/LanguageContext";
 
 const PAGE_SIZE = 10;
-
 const ACTION_LABEL_KEYS: Record<string, string> = {
   CREATE_SHIPMENT: "logCreateShipment",
   UPLOAD_DOCUMENT: "logUploadDocument",
+  UPLOAD_OCR_DOCUMENT: "logUploadOcrDocument",
+  PASS_DOCUMENT: "logPassDocument",
   ARCHIVE_DOCUMENTS: "logArchiveDocuments",
   EDIT_RETURN_ITEM: "logEditContainerTransport",
   EDIT_SHIPMENT_DETAILS: "logEditShipmentDetails",
   CANCEL_SHIPMENT: "logCancelShipment",
+  CREATE_MASTER_DATA: "logCreateMasterData",
+  UPDATE_MASTER_DATA: "logUpdateMasterData",
   REGISTER_USER: "logRegisterUser",
   UPDATE_USER_PERMISSION: "logUpdatePermission",
   UPDATE_USER_PASSWORD: "logResetPassword",
 };
 
-function getActionLabel(action: string, translate: (key: string) => string): string {
-  const normalized = action.trim().toUpperCase();
-  return ACTION_LABEL_KEYS[normalized] ? translate(ACTION_LABEL_KEYS[normalized]) : action || translate("unknown");
+function actionLabel(action: string, t: (key: string) => string): string {
+  const key = ACTION_LABEL_KEYS[action.trim().toUpperCase()];
+  return key ? t(key) : action || t("unknown");
 }
 
-function formatDateTime(value: string, language: "vi" | "en"): string {
-  if (!value) return "—";
+function dateTime(value: string, language: "vi" | "en"): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  if (Number.isNaN(date.getTime())) return value || "—";
   return date.toLocaleString(language === "en" ? "en-GB" : "vi-VN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
+    hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric",
   });
 }
 
-function getActor(log: ActivityLog): string {
+function actor(log: ActivityLog): string {
   return log.userName || log.username || (log.userId ? `User #${log.userId}` : "—");
 }
 
-function getPageNumbers(currentPage: number, totalPages: number): Array<number | "…"> {
-  if (totalPages <= 7) {
-    return Array.from({ length: totalPages }, (_, index) => index + 1);
-  }
-
+function pageNumbers(current: number, total: number): Array<number | "…"> {
+  if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
   const pages: Array<number | "…"> = [1];
-  if (currentPage > 3) pages.push("…");
-  for (let page = Math.max(2, currentPage - 1); page <= Math.min(totalPages - 1, currentPage + 1); page += 1) {
-    pages.push(page);
-  }
-  if (currentPage < totalPages - 2) pages.push("…");
-  pages.push(totalPages);
+  if (current > 3) pages.push("…");
+  for (let page = Math.max(2, current - 1); page <= Math.min(total - 1, current + 1); page += 1) pages.push(page);
+  if (current < total - 2) pages.push("…");
+  pages.push(total);
   return pages;
 }
 
@@ -74,196 +67,97 @@ export default function ActivityLogsPage() {
     if (!canViewLogs) return;
     setLoading(true);
     setError("");
-    try {
-      setLogs(await getActivityLogs());
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : t("activityLogLoadError"));
-    } finally {
-      setLoading(false);
-    }
+    try { setLogs(await getActivityLogs()); }
+    catch (loadError) { setError(loadError instanceof Error ? loadError.message : t("activityLogLoadError")); }
+    finally { setLoading(false); }
   }, [canViewLogs, t]);
 
   useEffect(() => {
-    if (!canViewLogs) {
-      router.replace("/");
-      return;
-    }
+    if (!canViewLogs) { router.replace("/"); return; }
     void loadLogs();
   }, [canViewLogs, loadLogs, router]);
 
   const filteredLogs = useMemo(() => {
     const keyword = query.trim().toLocaleLowerCase("vi");
     if (!keyword) return logs;
-    return logs.filter((log) =>
-      [getActor(log), log.role, log.session, log.action, getActionLabel(log.action, t), log.location, log.detail]
-        .join(" ")
-        .toLocaleLowerCase("vi")
-        .includes(keyword),
-    );
-  }, [logs, query, t]);
+    return logs.filter((log) => [actor(log), log.role, log.session, log.action, actionLabel(log.action, t), activityLogSummary(log.action, log.detail, log.location, language), log.location, log.detail]
+      .join(" ").toLocaleLowerCase("vi").includes(keyword));
+  }, [logs, query, t, language]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLogs.length / PAGE_SIZE));
-  const safePage = Math.min(page, totalPages);
-  const displayedLogs = filteredLogs.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const currentPage = Math.min(page, totalPages);
+  const displayedLogs = filteredLogs.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  if (!canViewLogs) {
-    return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
-      </div>
-    );
-  }
+  if (!canViewLogs) return <div className="flex min-h-[50vh] items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>;
 
   return (
     <section className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-gray-800 dark:text-white/90">{t("activityLogs")}</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {t("activityLogsDescription")}
-          </p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("activityLogsDescription")}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => void loadLogs()}
-          disabled={loading}
-          className="inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition-colors hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10"
-        >
-          <svg className={loading ? "animate-spin" : ""} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <polyline points="23 4 23 10 17 10" />
-            <polyline points="1 20 1 14 7 14" />
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-          </svg>
-          {loading ? t("loading") : t("refreshData")}
-        </button>
+        <button type="button" onClick={() => void loadLogs()} disabled={loading} className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">{loading ? t("loading") : t("refreshData")}</button>
       </div>
-
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03]">
-        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 border-b border-gray-100 p-4 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:p-5">
           <div>
             <h2 className="font-semibold text-gray-800 dark:text-white/90">{t("operationHistory")}</h2>
-            <p className="mt-0.5 text-xs text-gray-400">{t("recordCount", { count: filteredLogs.length })}</p>
+            <p className="mt-0.5 text-xs text-gray-500">{t("recordCount", { count: filteredLogs.length })}</p>
           </div>
-          <div className="relative w-full sm:max-w-sm">
-            <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              value={query}
-              onChange={(event) => {
-                setQuery(event.target.value);
-                setPage(1);
-              }}
-              placeholder={t("searchActivityLogs")}
-              className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 py-2 pl-10 pr-3 text-sm text-gray-800 outline-none transition focus:border-brand-400 focus:bg-white focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800/50 dark:text-white dark:focus:border-brand-500"
-            />
-          </div>
+          <input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={t("searchActivityLogs")} aria-label={t("searchActivityLogs")} className="h-10 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 text-sm text-gray-800 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-gray-800 dark:text-white sm:max-w-sm" />
         </div>
-
         {error ? (
-          <div className="m-4 rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">
-            {error}
-          </div>
+          <div className="m-4 rounded-xl border border-error-200 bg-error-50 px-4 py-3 text-sm text-error-700 dark:border-error-500/30 dark:bg-error-500/10 dark:text-error-400">{error}</div>
         ) : loading ? (
-          <div className="flex min-h-64 items-center justify-center">
-            <div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
-          </div>
+          <div className="flex min-h-52 items-center justify-center"><div className="h-9 w-9 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" /></div>
         ) : displayedLogs.length === 0 ? (
-          <div className="flex min-h-64 flex-col items-center justify-center gap-2 px-4 text-center text-sm text-gray-400">
-            <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M9 12h6" /><path d="M9 16h6" /><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><polyline points="13 2 13 9 20 9" />
-            </svg>
-            {t("noActivityLogs")}
-          </div>
+          <div className="flex min-h-52 items-center justify-center px-4 text-center text-sm text-gray-500">{t("noActivityLogs")}</div>
         ) : (
-          <>
-            <div className="space-y-3 p-4 lg:hidden">
-              {displayedLogs.map((log, logIndex) => (
-                <article key={log.id || `mobile-log-${logIndex}`} className="rounded-xl border border-gray-200 p-4 dark:border-gray-700">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-400">
-                      {getActionLabel(log.action, t)}
-                    </span>
-                    <time className="text-right text-xs text-gray-400">{formatDateTime(log.createdAt, language)}</time>
+          <div className="divide-y divide-gray-100 dark:divide-gray-800">
+            {displayedLogs.map((log, index) => {
+              const summary = activityLogSummary(log.action, log.detail, log.location, language);
+              const hasMore = Boolean(log.location || (log.detail && log.detail !== summary));
+              return (
+                <article key={log.id || `log-${currentPage}-${index}`} className="px-4 py-4 transition-colors hover:bg-gray-50/60 dark:hover:bg-white/[0.02] sm:px-5">
+                  <div className="flex gap-3">
+                    <span aria-hidden="true" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-50 text-sm font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">{actor(log).charAt(0).toUpperCase()}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="font-semibold text-gray-800 dark:text-white/90">{actor(log)}</span>
+                        <span className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-700 dark:bg-brand-500/10 dark:text-brand-300">{actionLabel(log.action, t)}</span>
+                        <time dateTime={log.createdAt} className="text-xs text-gray-500 sm:ml-auto">{dateTime(log.createdAt, language)}</time>
+                      </div>
+                      {summary && <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">{summary}</p>}
+                      <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-gray-400">
+                        {(log.role || log.session) && <span>{[log.role, log.session].filter(Boolean).join(" · ")}</span>}
+                        {hasMore && (
+                          <details className="group w-full pt-1">
+                            <summary className="w-fit cursor-pointer font-medium text-brand-600 hover:underline dark:text-brand-400">{t("logViewDetails")}</summary>
+                            <div className="mt-2 space-y-1 rounded-lg bg-gray-50 p-3 text-xs text-gray-600 dark:bg-gray-800/70 dark:text-gray-300">
+                              {log.detail && log.detail !== summary && <p className="break-words">{log.detail}</p>}
+                              {log.location && <p className="break-all text-gray-400">{log.location}</p>}
+                            </div>
+                          </details>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <p className="mt-3 text-sm font-semibold text-gray-800 dark:text-white/90">{getActor(log)}</p>
-                  <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
-                    <span className="rounded-md bg-gray-100 px-2 py-1 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                      Role: {log.role || "—"}
-                    </span>
-                    <span className="rounded-md bg-gray-100 px-2 py-1 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                      Session: {log.session || "—"}
-                    </span>
-                  </div>
-                  <p className="mt-1 break-words text-sm text-gray-600 dark:text-gray-300">{log.detail || t("noDetailContent")}</p>
-                  {log.location && <p className="mt-2 break-all text-xs text-gray-400">{log.location}</p>}
                 </article>
-              ))}
-            </div>
-
-            <div className="hidden overflow-x-auto lg:block">
-              <table className="w-full min-w-[1100px] table-fixed">
-                <thead className="bg-gray-50 dark:bg-gray-900/50">
-                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    <th className="w-[15%] px-5 py-3">{t("time")}</th>
-                    <th className="w-[13%] px-5 py-3">{t("performedBy")}</th>
-                    <th className="w-[8%] px-5 py-3">Role</th>
-                    <th className="w-[8%] px-5 py-3">Session</th>
-                    <th className="w-[15%] px-5 py-3">{t("action")}</th>
-                    <th className="w-[14%] px-5 py-3">{t("location")}</th>
-                    <th className="w-[27%] px-5 py-3">{t("content")}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                  {displayedLogs.map((log, logIndex) => (
-                    <tr key={log.id || `desktop-log-${logIndex}`} className="align-top transition-colors hover:bg-gray-50/70 dark:hover:bg-white/[0.02]">
-                      <td className="px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{formatDateTime(log.createdAt, language)}</td>
-                      <td className="px-5 py-4 text-sm font-semibold text-gray-800 dark:text-white/90">{getActor(log)}</td>
-                      <td className="break-words px-5 py-4 text-sm text-gray-600 dark:text-gray-300">{log.role || "—"}</td>
-                      <td className="break-words px-5 py-4 text-sm text-gray-600 dark:text-gray-300">{log.session || "—"}</td>
-                      <td className="px-5 py-4">
-                        <span className="inline-flex rounded-full bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700 dark:bg-brand-500/10 dark:text-brand-400">
-                          {getActionLabel(log.action, t)}
-                        </span>
-                      </td>
-                      <td className="break-all px-5 py-4 text-sm text-gray-500 dark:text-gray-400">{log.location || "—"}</td>
-                      <td className="break-words px-5 py-4 text-sm text-gray-700 dark:text-gray-300">{log.detail || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+              );
+            })}
+          </div>
         )}
-
         {!loading && !error && filteredLogs.length > PAGE_SIZE && (
           <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-3 dark:border-gray-800 sm:flex-row sm:items-center sm:justify-between sm:px-5">
-            <p className="text-xs text-gray-400">
-              {t("showingRecords", { from: (safePage - 1) * PAGE_SIZE + 1, to: Math.min(safePage * PAGE_SIZE, filteredLogs.length), total: filteredLogs.length })}
-            </p>
-            <div className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
-              {getPageNumbers(safePage, totalPages).map((pageNumber, index) =>
-                pageNumber === "…" ? (
-                  <span key={`ellipsis-${index}`} className="flex h-9 w-9 shrink-0 items-center justify-center text-sm text-gray-400">…</span>
-                ) : (
-                  <button
-                    key={pageNumber}
-                    type="button"
-                    onClick={() => setPage(pageNumber)}
-                    aria-label={t("goToPage", { page: pageNumber })}
-                    aria-current={pageNumber === safePage ? "page" : undefined}
-                    className={`h-9 w-9 shrink-0 rounded-lg border text-sm font-semibold transition-colors ${
-                      pageNumber === safePage
-                        ? "border-brand-500 bg-brand-500 text-white"
-                        : "border-gray-200 bg-white text-gray-600 hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:border-brand-500/50 dark:hover:bg-brand-500/10"
-                    }`}
-                  >
-                    {pageNumber}
-                  </button>
-                ),
-              )}
-            </div>
+            <p className="text-xs text-gray-500">{t("showingRecords", { from: (currentPage - 1) * PAGE_SIZE + 1, to: Math.min(currentPage * PAGE_SIZE, filteredLogs.length), total: filteredLogs.length })}</p>
+            <nav aria-label={t("operationHistory")} className="flex max-w-full items-center gap-1 overflow-x-auto pb-1 sm:pb-0">
+              {pageNumbers(currentPage, totalPages).map((number, index) => number === "…" ? (
+                <span key={`ellipsis-${index}`} className="flex h-9 w-9 shrink-0 items-center justify-center text-sm text-gray-400">…</span>
+              ) : (
+                <button key={number} type="button" onClick={() => setPage(number)} aria-label={t("goToPage", { page: number })} aria-current={number === currentPage ? "page" : undefined} className={`h-9 min-w-9 shrink-0 rounded-lg border px-2 text-sm font-semibold ${number === currentPage ? "border-brand-500 bg-brand-500 text-white" : "border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300"}`}>{number}</button>
+              ))}
+            </nav>
           </div>
         )}
       </div>
